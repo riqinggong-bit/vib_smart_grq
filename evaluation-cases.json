@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "purpose": "验证一次 Query 能否产生七个不同且可独立完成目标的网页方案",
+  "cases": [
+    {"type":"比较","query":"比较 React、Vue 和 Svelte，用于 4 人团队开发内部数据工具，要求两个月上线。","expectedComponents":["comparison"],"mustPreserve":["4 人团队","两个月上线"]},
+    {"type":"规划","query":"为两名开发者安排三天网页原型冲刺，包含分工、每日任务和验收。","expectedComponents":["timeline","checklist"],"mustPreserve":["两名开发者","三天"]},
+    {"type":"计算","query":"规划 80 平米房屋的基础装修预算，总预算 18 万，列出可调整项目与总价。","expectedComponents":["calculator","barChart"],"mustPreserve":["80 平米","18 万"]},
+    {"type":"解释","query":"向高中生解释傅里叶变换，需要直觉、步骤和频率分解示例。","expectedComponents":["steps","barChart"],"mustPreserve":["高中生","频率分解"]},
+    {"type":"分析","query":"分析一份月度销售摘要，找出异常、趋势和下月行动建议；数据不足时明确说明。","expectedComponents":["barChart","table"],"mustPreserve":["异常","数据不足时明确说明"]},
+    {"type":"商品决策","query":"为 Model Y 选择 2000 元内的家庭露营车载冰箱，需要冷藏母乳、冷冻饮料并保留装备空间。","expectedComponents":["comparison","calculator","checklist"],"mustPreserve":["Model Y","2000 元内","母乳","保留装备空间"]}
+  ]
+}
