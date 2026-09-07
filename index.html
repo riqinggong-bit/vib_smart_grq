@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>液态智能网页</title><link rel="stylesheet" href="styles.css"></head>
+<body>
+<main id="start" class="start">
+  <div class="intro"><p class="kicker">✦ LIQUID INTELLIGENT WEB</p><h1>一句需求，<br>展开你的专属网页。</h1><p>写下完整的 Query，AI 策划七个不同内容方案，选择一个展开完整网页。</p>
+  <form id="query-form"><label for="query">你的 Query</label><textarea id="query" required maxlength="6000" placeholder="例如：为两人团队制定三天网页原型开发计划，包含分工、每日任务和验收清单。"></textarea><button id="generate" class="primary" type="submit">策划七个内容方案 →</button></form>
+  <p id="connection" class="muted" role="status"></p><p id="error" role="alert"></p></div>
+  <div class="intro-art" aria-hidden="true"><div class="orb"></div><span>ONE QUERY<br>SEVEN PERSPECTIVES</span></div>
+</main>
+<main id="selection" class="selection hidden">
+  <button id="new-query" class="back">← 新建 Query</button><p class="kicker">CHOOSE YOUR PERSPECTIVE</p><h1>同一个 Query，七个内容方案。</h1><p id="selection-title"></p><p id="selection-query" class="query-summary"></p><p id="plan-error" role="alert"></p><div class="form-grid" id="form-grid"></div>
+</main>
+<main id="result" class="result hidden"></main>
+<script src="app.js"></script></body></html>
