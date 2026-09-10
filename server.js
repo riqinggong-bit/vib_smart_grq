@@ -81,7 +81,7 @@ function createServer(){return http.createServer((req,res)=>{
   })
  }
  const file=route==='/'?'/index.html':route;
- if(!['GET','HEAD'].includes(req.method)||!['/index.html','/app.js','/styles.css','/product-links.css','/evaluation-cases.json'].includes(file)){res.writeHead(404);return res.end('Not found')}
+ if(!['GET','HEAD'].includes(req.method)||!['/index.html','/app.js','/styles.css','/product-links.css','/loading.css','/evaluation-cases.json'].includes(file)){res.writeHead(404);return res.end('Not found')}
  res.writeHead(200,{'Content-Type':mime[path.extname(file)]||'application/octet-stream'});if(req.method==='HEAD')return res.end();fs.createReadStream(path.join(root,file)).pipe(res)
 })}
 if(require.main===module)createServer().listen(Number(process.env.PORT)||3000,'0.0.0.0',()=>console.log(`Liquid web: http://localhost:${process.env.PORT||3000}`));
