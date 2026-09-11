@@ -3236,7 +3236,7 @@ function compressImage(file){
     img.onerror=()=>{
       URL.revokeObjectURL(url);
       reject(
-        Error('图片读取失败，请换一张图片。')
+        Error('图片压缩失败。')
       );
     };
 
@@ -3244,10 +3244,50 @@ function compressImage(file){
   });
 }
 
+function readImageFile(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+
+    reader.onload=()=>{
+      const dataUrl=
+        String(reader.result||'');
+
+      if(!dataUrl.includes(',')){
+        reject(
+          Error('图片读取失败，请换一张图片。')
+        );
+        return;
+      }
+
+      resolve({
+        name:file.name,
+        mimeType:
+          dataUrl
+            .slice(5,dataUrl.indexOf(';'))||
+          file.type||
+          'image/png',
+        data:dataUrl.split(',')[1]
+      });
+    };
+
+    reader.onerror=()=>reject(
+      Error('图片读取失败，请换一张图片。')
+    );
+
+    reader.readAsDataURL(file);
+  });
+}
+
 async function buildImages(){
   return Promise.all(
     imageFiles.map(
-      x=>compressImage(x.file)
+      async x=>{
+        try{
+          return await compressImage(x.file);
+        }catch{
+          return readImageFile(x.file);
+        }
+      }
     )
   );
 }
