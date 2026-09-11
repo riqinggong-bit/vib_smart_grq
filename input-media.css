@@ -39,11 +39,27 @@
 
 .image-list span,
 .image-list small{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
   border-radius:999px;
   background:#252337;
   color:#aaa6b7;
   padding:6px 10px;
   font-size:11px;
+}
+
+.image-list button{
+  display:grid;
+  place-items:center;
+  width:18px;
+  height:18px;
+  border:0;
+  border-radius:50%;
+  background:#ff684b;
+  color:#17131d;
+  font-weight:900;
+  line-height:1;
 }
 
 @media(max-width:520px){

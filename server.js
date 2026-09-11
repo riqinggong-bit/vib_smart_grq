@@ -344,6 +344,22 @@ function attachEvidence(p,evidence=[]){
  return p;
 }
 
+function imageParts(images=[]){
+ return Array.isArray(images)
+  ? images
+   .filter(x=>
+    x&&
+    typeof x.mimeType==='string'&&
+    /^image\/(png|jpe?g|webp|gif)$/i
+     .test(x.mimeType)&&
+    typeof x.data==='string'&&
+    /^[A-Za-z0-9+/=]+$/.test(x.data)&&
+    x.data.length<1400000
+   )
+   .slice(0,4)
+  : [];
+}
+
 function parsePlan(o){
  const p=jsonOf(o,'方案');
  const v=p?.variants;
@@ -645,7 +661,8 @@ async function requestCloseAI(
  input,
  instructions,
  schema,
- parser
+ parser,
+ images=[]
 ){
  const endpoint=
   `${closeAIBase}/chat/completions`;
@@ -685,7 +702,20 @@ async function requestCloseAI(
    },
    {
     role:'user',
-    content:input
+    content:imageParts(images).length
+     ? [
+        {
+         type:'text',
+         text:input
+        },
+        ...imageParts(images).map(img=>({
+         type:'image_url',
+         image_url:{
+          url:`data:${img.mimeType};base64,${img.data}`
+         }
+        }))
+       ]
+     : input
    }
   ]);
 
@@ -821,7 +851,8 @@ async function requestGeminiOfficial(
  instructions,
  schema,
  parser,
- ground=false
+ ground=false,
+ images=[]
 ){
  const endpoint=
   `${geminiBase}/v1beta/models/${encodeURIComponent(model)}:generateContent`;
@@ -834,9 +865,17 @@ async function requestGeminiOfficial(
   },
   contents:[{
    role:'user',
-   parts:[{
-    text:input
-   }]
+   parts:[
+    {
+     text:input
+    },
+    ...imageParts(images).map(img=>({
+     inlineData:{
+      mimeType:img.mimeType,
+      data:img.data
+     }
+    }))
+   ]
   }],
   generationConfig:{
    responseMimeType:'application/json',
@@ -986,14 +1025,16 @@ async function requestModel(
  instructions,
  schema,
  parser,
- ground=false
+ ground=false,
+ images=[]
 ){
  if(isCloseAI){
   return requestCloseAI(
    input,
    instructions,
    schema,
-   parser
+   parser,
+   images
   );
  }
 
@@ -1003,7 +1044,8 @@ async function requestModel(
    instructions,
    schema,
    parser,
-   ground
+   ground,
+   images
   );
  }
 
@@ -1022,12 +1064,13 @@ const pagePrompt=
  '生成一份真正完成用户任务的统一内容结果，之后会被七种界面共同渲染。必须保留全部约束，先给关键判断，再展示思考路径、可比较的信息、可执行步骤与最终选择。若任务涉及购买、品牌或服务选择：至少列出3个不同品牌或候选项，分别写清适用人群、关键区别、风险和待核实参数；在相关section的links中为每个候选项给出搜索入口，label写候选名称，query写完整品牌型号关键词，channel在official、jd、taobao中选择，至少同时覆盖京东和淘宝。系统会安全生成站内搜索链接，不得编造商品详情URL。非购买任务的links返回空数组。所有外部事实必须来自sharedFacts；无法核实的参数或价格明确写待核实，不得伪造来源或精确数据。内容要具体。calculator用rows表示输入字段，第一行固定为[名称,初值,最小值,最大值,步长,单位]；items第一项只用sum或product。comparison/table/barChart使用rows且第一行表头，barChart第二列为数字。checklist/timeline/steps/cards用items。未使用字段返回空数组。用中文。';
 
 const planQuery=
- q=>requestModel(
+ (q,images=[])=>requestModel(
   q,
   planPrompt,
   planSchema,
   parsePlan,
-  isGemini
+  isGemini,
+  images
  );
 
 const generatePage=
@@ -1173,7 +1216,7 @@ function body(
 
    if(
     Buffer.byteLength(b)>
-    32768
+    7000000
    ){
     done=true;
 
@@ -1415,7 +1458,8 @@ function createServer(){
 
         const plan=
          await planQuery(
-          payload.query.trim()
+          payload.query.trim(),
+          payload.images
          );
 
         prune();

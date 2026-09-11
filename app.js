@@ -3066,6 +3066,7 @@ function reset(){
   $('#query').value='';
   $('#image-notes').value='';
   imageFiles.length=0;
+  $('#reference-images').value='';
   renderImageList();
 
   go('start');
@@ -3104,10 +3105,11 @@ function renderImageList(){
   box.innerHTML=
     imageFiles.length
       ? imageFiles
-        .map(
-          f=>`
+        .map((f,i)=>
+          `
             <span title="${esc(f.name)}">
               ${esc(clip(f.name,22))}
+              <button type="button" data-remove-image="${i}" aria-label="删除 ${esc(f.name)}">×</button>
             </span>
           `
         )
@@ -3115,20 +3117,38 @@ function renderImageList(){
       : '<small>未添加图片</small>';
 }
 
-$('#reference-images').onchange=e=>{
-  imageFiles.length=0;
+$('#image-list').onclick=e=>{
+  const btn=
+    e.target.closest(
+      '[data-remove-image]'
+    );
 
+  if(!btn){
+    return;
+  }
+
+  imageFiles.splice(
+    Number(btn.dataset.removeImage),
+    1
+  );
+
+  $('#reference-images').value='';
+  renderImageList();
+};
+
+$('#reference-images').onchange=e=>{
   imageFiles.push(
     ...[...e.target.files]
-      .slice(0,6)
+      .filter(f=>
+        /^image\//.test(f.type)
+      )
+      .slice(0,4-imageFiles.length)
       .map(
-        f=>({
-          name:f.name,
-          type:f.type,
-          size:f.size
-        })
+        file=>({file,name:file.name,type:file.type,size:file.size})
       )
   );
+
+  e.target.value='';
 
   renderImageList();
 };
@@ -3156,12 +3176,80 @@ function buildQuery(){
     '',
     '【参考图片上下文】',
     imageFiles.length
-      ? `用户上传/选择了 ${imageFiles.length} 张参考图片，文件名：${imageFiles.map(f=>f.name).join('、')}。当前版本无法直接识别图片像素，请主要依据用户填写的图片说明，不要声称已经看见图片细节。`
+      ? `用户上传了 ${imageFiles.length} 张参考图片，文件名：${imageFiles.map(f=>f.name).join('、')}。请真实读取图片中的文字、物体、布局、颜色和可见信息；若图片无法识别或信息不清晰，必须标注“图片信息待核实”。`
       : '用户没有选择图片文件，但提供了图片相关说明。',
     notes
       ? `图片说明：${notes}`
-      : '图片说明：用户暂未填写，请不要臆测图片内容。'
+      : '图片说明：用户暂未填写，请直接根据图片可见内容分析，不要臆测看不清的细节。'
   ].join('\n');
+}
+
+function compressImage(file){
+  return new Promise((resolve,reject)=>{
+    const img=new Image();
+    const url=URL.createObjectURL(file);
+
+    img.onload=()=>{
+      const max=1280;
+      const scale=Math.min(
+        1,
+        max/Math.max(img.width,img.height)
+      );
+      const canvas=document.createElement('canvas');
+
+      canvas.width=Math.max(
+        1,
+        Math.round(img.width*scale)
+      );
+      canvas.height=Math.max(
+        1,
+        Math.round(img.height*scale)
+      );
+
+      canvas
+        .getContext('2d')
+        .drawImage(
+          img,
+          0,
+          0,
+          canvas.width,
+          canvas.height
+        );
+
+      URL.revokeObjectURL(url);
+
+      const dataUrl=
+        canvas.toDataURL(
+          file.type==='image/png'
+            ? 'image/png'
+            : 'image/jpeg',
+          .82
+        );
+
+      resolve({
+        name:file.name,
+        mimeType:dataUrl.slice(5,dataUrl.indexOf(';')),
+        data:dataUrl.split(',')[1]
+      });
+    };
+
+    img.onerror=()=>{
+      URL.revokeObjectURL(url);
+      reject(
+        Error('图片读取失败，请换一张图片。')
+      );
+    };
+
+    img.src=url;
+  });
+}
+
+async function buildImages(){
+  return Promise.all(
+    imageFiles.map(
+      x=>compressImage(x.file)
+    )
+  );
 }
 
 /* =========================================================
@@ -3192,9 +3280,14 @@ $('#query-form').onsubmit=
       '';
 
     $('#generate').textContent=
-      '正在理解需求与组织统一答案…';
+      imageFiles.length
+        ? '正在读取图片并理解需求…'
+        : '正在理解需求与组织统一答案…';
 
     try{
+      const images=
+        await buildImages();
+
       const r=
         await fetch(
           '/api/plan',
@@ -3208,7 +3301,8 @@ $('#query-form').onsubmit=
 
             body:
               JSON.stringify({
-                query:q
+                query:q,
+                images
               }),
 
             signal:
