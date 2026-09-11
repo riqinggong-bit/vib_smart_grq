@@ -1401,14 +1401,14 @@ function createServer(){
          'string'||
          !payload.query.trim()||
          payload.query.length>
-         6000
+         9000
         ){
          return send(
           res,
           400,
           {
            error:
-            'Query 必须是 1–6000 字符。'
+           'Query 必须是 1–9000 字符。'
           }
          );
         }
@@ -1591,6 +1591,7 @@ function createServer(){
      '/product-links.css',
      '/loading.css',
      '/evidence.css',
+     '/input-media.css',
      '/evaluation-cases.json'
     ].includes(file)
    ){

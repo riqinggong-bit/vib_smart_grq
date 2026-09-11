@@ -22,6 +22,7 @@ const clip=(v,n)=>{
   return s.length>n?s.slice(0,n-1)+'…':s;
 };
 
+const imageFiles=[];
 let plan,page,query='',active=-1,busy=false,checks=new Set();
 
 const pages=new Map();
@@ -378,6 +379,10 @@ function table(rows,pick=false){
     return '';
   }
 
+  const headers=
+    rows[0]
+      .map(x=>String(x||''));
+
   return `
     <div class="table-scroll">
       <table>
@@ -406,7 +411,7 @@ function table(rows,pick=false){
                 >
                   ${
                     r.map((x,j)=>`
-                      <td>
+                      <td data-label="${esc(headers[j]||'字段')}">
                         ${
                           j===0
                             ? '<b>'+esc(x)+'</b>'
@@ -3059,6 +3064,9 @@ function reset(){
   controls.clear();
 
   $('#query').value='';
+  $('#image-notes').value='';
+  imageFiles.length=0;
+  renderImageList();
 
   go('start');
 }
@@ -3085,6 +3093,77 @@ $('#form-grid').onclick=e=>{
 $('#new-query').onclick=
   reset;
 
+function renderImageList(){
+  const box=
+    $('#image-list');
+
+  if(!box){
+    return;
+  }
+
+  box.innerHTML=
+    imageFiles.length
+      ? imageFiles
+        .map(
+          f=>`
+            <span title="${esc(f.name)}">
+              ${esc(clip(f.name,22))}
+            </span>
+          `
+        )
+        .join('')
+      : '<small>未添加图片</small>';
+}
+
+$('#reference-images').onchange=e=>{
+  imageFiles.length=0;
+
+  imageFiles.push(
+    ...[...e.target.files]
+      .slice(0,6)
+      .map(
+        f=>({
+          name:f.name,
+          type:f.type,
+          size:f.size
+        })
+      )
+  );
+
+  renderImageList();
+};
+
+function buildQuery(){
+  const main=
+    $('#query')
+      .value
+      .trim();
+
+  const notes=
+    $('#image-notes')
+      .value
+      .trim();
+
+  if(
+    !imageFiles.length&&
+    !notes
+  ){
+    return main;
+  }
+
+  return [
+    main,
+    '',
+    '【参考图片上下文】',
+    imageFiles.length
+      ? `用户上传/选择了 ${imageFiles.length} 张参考图片，文件名：${imageFiles.map(f=>f.name).join('、')}。当前版本无法直接识别图片像素，请主要依据用户填写的图片说明，不要声称已经看见图片细节。`
+      : '用户没有选择图片文件，但提供了图片相关说明。',
+    notes
+      ? `图片说明：${notes}`
+      : '图片说明：用户暂未填写，请不要臆测图片内容。'
+  ].join('\n');
+}
+
 /* =========================================================
    Generate Query
 ========================================================= */
@@ -3098,9 +3177,7 @@ $('#query-form').onsubmit=
     }
 
     const q=
-      $('#query')
-        .value
-        .trim();
+      buildQuery();
 
     if(!q){
       return;
