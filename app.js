@@ -1,79 +1,42 @@
 const layouts={
-  hand:[
-    '手账决策本',
-    '把推理、比较和结论写成一页手账'
-  ],
-  terminal:[
-    '双区分析台',
-    '用终端视角查看约束、数据与判断'
-  ],
-  magazine:[
-    '专题编辑部',
-    '用杂志叙事读懂完整答案'
-  ],
-  ice:[
-    'ICE. 速览报',
-    '先看结论，再快速扫描关键证据'
-  ],
-  minimal:[
-    '留白阅读页',
-    '去掉干扰，专注逻辑和行动清单'
-  ],
-  app:[
-    '任务工作台',
-    '把答案变成可勾选、可调整的操作台'
-  ],
-  neon:[
-    '数据驾驶舱',
-    '用指标与图表掌握决策重点'
-  ]
+  hand:['手账决策本','把推理、比较和结论写成一页手账'],
+  terminal:['双区分析台','用终端视角查看约束、数据与判断'],
+  magazine:['专题编辑部','用杂志叙事读懂完整答案'],
+  ice:['ICE. 速览报','先看结论，再快速扫描关键证据'],
+  minimal:['留白阅读页','去掉干扰，专注逻辑和行动清单'],
+  app:['任务工作台','把答案变成可勾选、可调整的操作台'],
+  neon:['数据驾驶舱','用指标与图表掌握决策重点']
 };
 
 const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({
+  '&':'&amp;',
+  '<':'&lt;',
+  '>':'&gt;',
+  '"':'&quot;',
+  "'":'&#39;'
+}[c]));
 
-const esc=s=>
-  String(s??'').replace(
-    /[&<>"']/g,
-    c=>({
-      '&':'&amp;',
-      '<':'&lt;',
-      '>':'&gt;',
-      '"':'&quot;',
-      "'":'&#39;'
-    }[c])
-  );
+const clip=(v,n)=>{
+  const s=String(v||'').replace(/\s+/g,' ').trim();
+  return s.length>n?s.slice(0,n-1)+'…':s;
+};
 
-let plan;
-let page;
-let query='';
-let active=-1;
-let busy=false;
-let checks=new Set();
+let plan,page,query='',active=-1,busy=false,checks=new Set();
 
 const pages=new Map();
 const checksets=new Map();
 const controls=new Map();
 
-const storeKey='liquid-web-v6';
-
-const clip=(v,n)=>{
-  const s=String(v||'')
-    .replace(/\s+/g,' ')
-    .trim();
-
-  return s.length>n
-    ? s.slice(0,n-1)+'…'
-    : s;
-};
+const storeKey='liquid-web-v7';
 
 function go(id){
-  ['start','selection','result']
-    .forEach(x=>{
-      $('#'+x).classList.toggle(
-        'hidden',
-        x!==id
-      );
-    });
+  ['start','selection','result'].forEach(x=>{
+    $('#'+x).classList.toggle(
+      'hidden',
+      x!==id
+    );
+  });
 
   scrollTo(0,0);
 }
@@ -105,7 +68,7 @@ function save(){
 }
 
 /* =========================================================
-   方案选择页
+   七种方案预览
 ========================================================= */
 
 function preview(layout,title){
@@ -125,8 +88,16 @@ function preview(layout,title){
   if(layout==='magazine'){
     return `
       <div class="pv magazine-pv">
-        <em>双<br>面<br>决<br>策</em>
-        <small>ISSUE 01</small>
+        <em>
+          双<br>
+          面<br>
+          决<br>
+          策
+        </em>
+
+        <small>
+          ISSUE 01
+        </small>
       </div>
     `;
   }
@@ -134,8 +105,13 @@ function preview(layout,title){
   if(layout==='ice'){
     return `
       <div class="pv ice-pv">
-        <b>ICE.</b>
-        <small>NO. 01 / BRIEF</small>
+        <b>
+          ICE.
+        </b>
+
+        <small>
+          NO. 01 / BRIEF
+        </small>
       </div>
     `;
   }
@@ -143,7 +119,10 @@ function preview(layout,title){
   if(layout==='minimal'){
     return `
       <div class="pv minimal-pv">
-        <small>Answer · Focus</small>
+        <small>
+          Answer · Focus
+        </small>
+
         <i></i>
         <i></i>
       </div>
@@ -153,7 +132,10 @@ function preview(layout,title){
   if(layout==='app'){
     return `
       <div class="pv app-pv">
-        <span>▣ 任务总览</span>
+        <span>
+          ▣ 任务总览
+        </span>
+
         <div>
           ✓ 核心结论
           <i>查看</i>
@@ -166,8 +148,10 @@ function preview(layout,title){
     return `
       <div class="pv neon-pv">
         <b>✣</b>
+
         <span>
-          FACTS　◆◆◆<br>
+          FACTS　◆◆◆
+          <br>
           STATUS　READY
         </span>
       </div>
@@ -179,7 +163,11 @@ function preview(layout,title){
       <b>
         📝 ${esc(clip(title||name,11))} ♥
       </b>
-      <small>#just for you</small>
+
+      <small>
+        #just for you
+      </small>
+
       <i></i>
     </div>
   `;
@@ -202,8 +190,13 @@ function renderPlans(){
             ${preview(v.layout,v.title)}
 
             <div class="form-meta">
-              <b>${esc(meta[0])}</b>
-              <span>${esc(v.layout)}</span>
+              <b>
+                ${esc(meta[0])}
+              </b>
+
+              <span>
+                ${esc(v.layout)}
+              </span>
             </div>
 
             <div class="tags">
@@ -252,7 +245,7 @@ function renderPlans(){
 }
 
 /* =========================================================
-   事实 / 来源
+   Facts / Evidence
 ========================================================= */
 
 function factStatus(f){
@@ -345,7 +338,9 @@ function factNote(ids=[]){
         f=>ids.includes(f.id)
       );
 
-  if(!fs.length)return '';
+  if(!fs.length){
+    return '';
+  }
 
   return `
     <details class="fact-note">
@@ -375,11 +370,13 @@ function factNote(ids=[]){
 }
 
 /* =========================================================
-   通用内容组件
+   通用组件
 ========================================================= */
 
 function table(rows,pick=false){
-  if(!rows?.length)return '';
+  if(!rows?.length){
+    return '';
+  }
 
   return `
     <div class="table-scroll">
@@ -448,7 +445,9 @@ function calculator(s,n){
       ${
         s.fields.map((f,i)=>`
           <label>
-            <span>${esc(f.label)}</span>
+            <span>
+              ${esc(f.label)}
+            </span>
 
             <output>
               ${f.value} ${esc(f.unit)}
@@ -473,7 +472,10 @@ function calculator(s,n){
 }
 
 function chart(rows){
-  if(!rows||rows.length<2){
+  if(
+    !rows||
+    rows.length<2
+  ){
     return '';
   }
 
@@ -484,7 +486,10 @@ function chart(rows){
       );
 
   const max=
-    Math.max(1,...vals);
+    Math.max(
+      1,
+      ...vals
+    );
 
   return `
     <div class="bar-chart">
@@ -492,7 +497,9 @@ function chart(rows){
         rows.slice(1)
           .map((r,i)=>`
             <div>
-              <span>${esc(r[0])}</span>
+              <span>
+                ${esc(r[0])}
+              </span>
 
               <i
                 style="
@@ -505,7 +512,9 @@ function chart(rows){
                 "
               ></i>
 
-              <b>${esc(r[1])}</b>
+              <b>
+                ${esc(r[1])}
+              </b>
             </div>
           `)
           .join('')
@@ -516,7 +525,9 @@ function chart(rows){
 
 function linkUrl(x){
   const q=
-    encodeURIComponent(x.query);
+    encodeURIComponent(
+      x.query
+    );
 
   if(x.channel==='jd'){
     return `https://search.jd.com/Search?keyword=${q}`;
@@ -534,7 +545,9 @@ function linkUrl(x){
 }
 
 function actionLinks(links=[]){
-  if(!links.length)return '';
+  if(!links.length){
+    return '';
+  }
 
   return `
     <div class="product-links">
@@ -561,8 +574,13 @@ function actionLinks(links=[]){
               </span>
 
               <p>
-                <b>${esc(x.label)}</b>
-                <small>${esc(x.query)}</small>
+                <b>
+                  ${esc(x.label)}
+                </b>
+
+                <small>
+                  ${esc(x.query)}
+                </small>
               </p>
 
               <a
@@ -586,11 +604,6 @@ function actionLinks(links=[]){
   `;
 }
 
-/* =========================================================
-   原通用 section
-   Hand 和另外四套通用页面继续使用
-========================================================= */
-
 function section(s,n){
   let c='';
 
@@ -601,84 +614,106 @@ function section(s,n){
     c=`
       <ol class="steps ${s.type}">
         ${
-          s.items.map((x,i)=>`
-            <li>
-              <span>
-                ${
-                  String(i+1)
-                    .padStart(2,'0')
-                }
-              </span>
+          s.items
+            .map((x,i)=>`
+              <li>
+                <span>
+                  ${
+                    String(i+1)
+                      .padStart(2,'0')
+                  }
+                </span>
 
-              ${esc(x)}
-            </li>
-          `).join('')
+                ${esc(x)}
+              </li>
+            `)
+            .join('')
         }
       </ol>
     `;
   }
 
-  else if(s.type==='cards'){
+  else if(
+    s.type==='cards'
+  ){
     c=`
       <div class="cards">
         ${
-          s.items.map((x,i)=>`
-            <article>
-              <span>
-                ${
-                  ['💡','🎯','✨','📌']
-                    [i%4]
-                }
-              </span>
+          s.items
+            .map((x,i)=>`
+              <article>
+                <span>
+                  ${
+                    [
+                      '💡',
+                      '🎯',
+                      '✨',
+                      '📌'
+                    ][i%4]
+                  }
+                </span>
 
-              ${esc(x)}
-            </article>
-          `).join('')
+                ${esc(x)}
+              </article>
+            `)
+            .join('')
         }
       </div>
     `;
   }
 
-  else if(s.type==='table'){
+  else if(
+    s.type==='table'
+  ){
     c=table(s.rows);
   }
 
-  else if(s.type==='comparison'){
+  else if(
+    s.type==='comparison'
+  ){
     c=table(
       s.rows,
       true
     );
   }
 
-  else if(s.type==='barChart'){
+  else if(
+    s.type==='barChart'
+  ){
     c=chart(s.rows);
   }
 
-  else if(s.type==='calculator'){
+  else if(
+    s.type==='calculator'
+  ){
     c=calculator(s,n);
   }
 
-  else if(s.type==='checklist'){
+  else if(
+    s.type==='checklist'
+  ){
     c=`
       <div class="checklist">
         ${
-          s.items.map((x,j)=>`
-            <label>
-              <input
-                type="checkbox"
-                data-check="${n}-${j}"
-                ${
-                  checks.has(n+'-'+j)
-                    ? 'checked'
-                    : ''
-                }
-              >
+          s.items
+            .map((x,j)=>`
+              <label>
+                <input
+                  type="checkbox"
+                  data-check="${n}-${j}"
+                  ${
+                    checks.has(n+'-'+j)
+                      ? 'checked'
+                      : ''
+                  }
+                >
 
-              <span>
-                ${esc(x)}
-              </span>
-            </label>
-          `).join('')
+                <span>
+                  ${esc(x)}
+                </span>
+              </label>
+            `)
+            .join('')
         }
       </div>
     `;
@@ -729,10 +764,6 @@ function section(s,n){
   `;
 }
 
-/* =========================================================
-   公共 Toolbar / Closing
-========================================================= */
-
 function renderToolbar(label){
   return `
     <header class="result-toolbar">
@@ -743,7 +774,9 @@ function renderToolbar(label){
         ← 七种形态
       </button>
 
-      <span>${esc(label)}</span>
+      <span>
+        ${esc(label)}
+      </span>
 
       <button
         id="fresh"
@@ -755,37 +788,49 @@ function renderToolbar(label){
   `;
 }
 
-function renderClosing(page,className='closing'){
+function closingTips(page){
   const last=
     page.sections
       .slice(-1)[0];
 
-  let tips=
+  const tips=
     (last?.items||[])
       .slice(0,3);
 
-  if(!tips.length){
-    tips=[page.summary];
-  }
+  return tips.length
+    ? tips
+    : [page.summary];
+}
 
+function renderClosing(
+  page,
+  className='closing'
+){
   return `
     <section class="${className}">
-      <h2>🤔 还在纠结？看这里</h2>
+      <h2>
+        🤔 还在纠结？看这里
+      </h2>
 
       <div>
         ${
-          tips.map((x,i)=>`
-            <article>
-              <span>
-                ${
-                  ['🌡️','🎒','💡']
-                    [i%3]
-                }
-              </span>
+          closingTips(page)
+            .map((x,i)=>`
+              <article>
+                <span>
+                  ${
+                    [
+                      '🌡️',
+                      '🎒',
+                      '💡'
+                    ][i%3]
+                  }
+                </span>
 
-              ${esc(clip(x,70))}
-            </article>
-          `).join('')
+                ${esc(clip(x,70))}
+              </article>
+            `)
+            .join('')
         }
       </div>
 
@@ -799,13 +844,11 @@ function renderClosing(page,className='closing'){
 
 /* =========================================================
    01 HAND
-   真正的个人手账结构
 ========================================================= */
 
 function renderHand(
   page,
-  plan,
-  variant
+  plan
 ){
   const chips=
     plan.constraints
@@ -823,14 +866,10 @@ function renderHand(
             String(i+1)
               .padStart(2,'0')
           }
+
           ${esc(s.heading)}
         </a>
       `)
-      .join('');
-
-  const mods=
-    page.sections
-      .map(section)
       .join('');
 
   return `
@@ -855,7 +894,9 @@ function renderHand(
       </header>
 
       <section class="hand-question">
-        <span>📝</span>
+        <span>
+          📝
+        </span>
 
         <div>
           <small>
@@ -873,7 +914,9 @@ function renderHand(
       </div>
 
       <section class="hand-summary">
-        <span>💡</span>
+        <span>
+          💡
+        </span>
 
         <div>
           <small>
@@ -891,10 +934,19 @@ function renderHand(
       </nav>
 
       <div class="hand-modules">
-        ${mods}
+        ${
+          page.sections
+            .map(section)
+            .join('')
+        }
       </div>
 
-      ${renderClosing(page,'hand-closing')}
+      ${
+        renderClosing(
+          page,
+          'hand-closing'
+        )
+      }
 
     </main>
   `;
@@ -902,13 +954,12 @@ function renderHand(
 
 /* =========================================================
    02 TERMINAL
-   完全不同的分析工作台结构
 ========================================================= */
 
 function terminalItems(s,n){
   if(
-    s.type==='table'||
-    s.type==='comparison'
+    ['table','comparison']
+      .includes(s.type)
   ){
     return table(
       s.rows,
@@ -916,65 +967,80 @@ function terminalItems(s,n){
     );
   }
 
-  if(s.type==='barChart'){
+  if(
+    s.type==='barChart'
+  ){
     return chart(s.rows);
   }
 
-  if(s.type==='calculator'){
+  if(
+    s.type==='calculator'
+  ){
     return calculator(s,n);
   }
 
-  if(s.type==='checklist'){
+  if(
+    s.type==='checklist'
+  ){
     return `
       <div class="terminal-checklist">
         ${
-          s.items.map((x,j)=>`
-            <label>
-              <input
-                type="checkbox"
-                data-check="${n}-${j}"
-                ${
-                  checks.has(n+'-'+j)
-                    ? 'checked'
-                    : ''
-                }
-              >
+          s.items
+            .map((x,j)=>`
+              <label>
+                <input
+                  type="checkbox"
+                  data-check="${n}-${j}"
+                  ${
+                    checks.has(n+'-'+j)
+                      ? 'checked'
+                      : ''
+                  }
+                >
 
-              <code>
-                [
-                ${
-                  checks.has(n+'-'+j)
-                    ? 'x'
-                    : ' '
-                }
-                ]
-              </code>
+                <code>
+                  [
+                  ${
+                    checks.has(n+'-'+j)
+                      ? 'x'
+                      : ' '
+                  }
+                  ]
+                </code>
 
-              <span>
-                ${esc(x)}
-              </span>
-            </label>
-          `).join('')
+                <span>
+                  ${esc(x)}
+                </span>
+              </label>
+            `)
+            .join('')
         }
       </div>
     `;
   }
 
-  if(s.type==='cards'){
+  if(
+    s.type==='cards'
+  ){
     return `
       <div class="terminal-cards">
         ${
-          s.items.map((x,i)=>`
-            <article>
-              <small>
-                CARD_${String(i+1).padStart(2,'0')}
-              </small>
+          s.items
+            .map((x,i)=>`
+              <article>
+                <small>
+                  CARD_${
+                    String(i+1)
+                      .padStart(2,'0')
+                  }
+                </small>
 
-              <p>
-                ${esc(x)}
-              </p>
-            </article>
-          `).join('')
+                <p>
+                  ${esc(x)}
+                </p>
+              </article>
+            `)
+            .join('')
         }
       </div>
     `;
@@ -983,22 +1049,26 @@ function terminalItems(s,n){
   return `
     <div class="terminal-lines">
       ${
-        s.items.map((x,i)=>`
-          <div>
-            <span>
-              ${
-                String(i+1)
-                  .padStart(2,'0')
-              }
-            </span>
+        s.items
+          .map((x,i)=>`
+            <div>
+              <span>
+                ${
+                  String(i+1)
+                    .padStart(2,'0')
+                }
+              </span>
 
-            <p>
-              ${esc(x)}
-            </p>
+              <p>
+                ${esc(x)}
+              </p>
 
-            <i>OK</i>
-          </div>
-        `).join('')
+              <i>
+                OK
+              </i>
+            </div>
+          `)
+          .join('')
       }
     </div>
   `;
@@ -1024,7 +1094,9 @@ function renderTerminalSection(s,n){
           ${esc(s.heading)}
         </h2>
 
-        <i>READY</i>
+        <i>
+          READY
+        </i>
       </header>
 
       <p class="terminal-intro">
@@ -1042,8 +1114,7 @@ function renderTerminalSection(s,n){
 
 function renderTerminal(
   page,
-  plan,
-  variant
+  plan
 ){
   const constraints=
     plan.constraints
@@ -1060,16 +1131,11 @@ function renderTerminal(
             ${esc(x)}
           </b>
 
-          <i>OK</i>
+          <i>
+            OK
+          </i>
         </div>
       `)
-      .join('');
-
-  const sections=
-    page.sections
-      .map(
-        renderTerminalSection
-      )
       .join('');
 
   return `
@@ -1078,6 +1144,7 @@ function renderTerminal(
     <main class="terminal-page">
 
       <header class="terminal-header">
+
         <div class="terminal-statusbar">
           <span>
             LIQUID_AI /
@@ -1102,6 +1169,7 @@ function renderTerminal(
             ${esc(page.subtitle)}
           </p>
         </div>
+
       </header>
 
       <div class="terminal-grid">
@@ -1143,8 +1211,13 @@ function renderTerminal(
           </div>
 
           <div class="terminal-side-ready">
-            <span>STATUS</span>
-            <b>READY</b>
+            <span>
+              STATUS
+            </span>
+
+            <b>
+              READY
+            </b>
           </div>
 
         </aside>
@@ -1168,10 +1241,15 @@ function renderTerminal(
           </section>
 
           <div class="terminal-sections">
-            ${sections}
+            ${
+              page.sections
+                .map(renderTerminalSection)
+                .join('')
+            }
           </div>
 
         </div>
+
       </div>
 
       <footer class="terminal-footer">
@@ -1190,13 +1268,12 @@ function renderTerminal(
 
 /* =========================================================
    03 MAGAZINE
-   编辑部专题 / 杂志阅读结构
 ========================================================= */
 
 function magazineContent(s,n){
   if(
-    s.type==='comparison'||
-    s.type==='table'
+    ['comparison','table']
+      .includes(s.type)
   ){
     return table(
       s.rows,
@@ -1204,81 +1281,95 @@ function magazineContent(s,n){
     );
   }
 
-  if(s.type==='barChart'){
+  if(
+    s.type==='barChart'
+  ){
     return chart(s.rows);
   }
 
-  if(s.type==='calculator'){
+  if(
+    s.type==='calculator'
+  ){
     return calculator(s,n);
   }
 
-  if(s.type==='checklist'){
+  if(
+    s.type==='checklist'
+  ){
     return `
       <div class="magazine-checklist">
         ${
-          s.items.map((x,j)=>`
-            <label>
-              <input
-                type="checkbox"
-                data-check="${n}-${j}"
-                ${
-                  checks.has(n+'-'+j)
-                    ? 'checked'
-                    : ''
-                }
-              >
+          s.items
+            .map((x,j)=>`
+              <label>
+                <input
+                  type="checkbox"
+                  data-check="${n}-${j}"
+                  ${
+                    checks.has(n+'-'+j)
+                      ? 'checked'
+                      : ''
+                  }
+                >
 
-              <span>
-                ${esc(x)}
-              </span>
-            </label>
-          `).join('')
-        }
-      </div>
-    `;
-  }
-
-  if(s.type==='cards'){
-    return `
-      <div class="magazine-cards">
-        ${
-          s.items.map((x,i)=>`
-            <article>
-              <small>
-                0${i+1}
-              </small>
-
-              <p>
-                ${esc(x)}
-              </p>
-            </article>
-          `).join('')
+                <span>
+                  ${esc(x)}
+                </span>
+              </label>
+            `)
+            .join('')
         }
       </div>
     `;
   }
 
   if(
-    s.type==='steps'||
-    s.type==='timeline'
+    s.type==='cards'
+  ){
+    return `
+      <div class="magazine-cards">
+        ${
+          s.items
+            .map((x,i)=>`
+              <article>
+                <small>
+                  0${i+1}
+                </small>
+
+                <p>
+                  ${esc(x)}
+                </p>
+              </article>
+            `)
+            .join('')
+        }
+      </div>
+    `;
+  }
+
+  if(
+    ['steps','timeline']
+      .includes(s.type)
   ){
     return `
       <ol class="magazine-steps">
         ${
-          s.items.map((x,i)=>`
-            <li>
-              <span>
-                ${
-                  String(i+1)
-                    .padStart(2,'0')
-                }
-              </span>
+          s.items
+            .map((x,i)=>`
+              <li>
+                <span>
+                  ${
+                    String(i+1)
+                      .padStart(2,'0')
+                  }
+                </span>
 
-              <p>
-                ${esc(x)}
-              </p>
-            </li>
-          `).join('')
+                <p>
+                  ${esc(x)}
+                </p>
+              </li>
+            `)
+            .join('')
         }
       </ol>
     `;
@@ -1287,9 +1378,11 @@ function magazineContent(s,n){
   return `
     <div class="magazine-copy">
       ${
-        s.items.map(
-          x=>`<p>${esc(x)}</p>`
-        ).join('')
+        s.items
+          .map(
+            x=>`<p>${esc(x)}</p>`
+          )
+          .join('')
       }
     </div>
   `;
@@ -1332,8 +1425,7 @@ function renderMagazineStory(s,n){
 
 function renderMagazine(
   page,
-  plan,
-  variant
+  plan
 ){
   const first=
     page.sections[0];
@@ -1363,10 +1455,7 @@ function renderMagazine(
 
           <span>
             ISSUE 01 ·
-            ${
-              new Date()
-                .getFullYear()
-            }
+            ${new Date().getFullYear()}
           </span>
         </div>
 
@@ -1465,113 +1554,1142 @@ function renderMagazine(
 
       <div class="magazine-columns">
         ${
-          rest.map(
-            (s,i)=>
-              renderMagazineStory(
-                s,
-                i+1
-              )
-          ).join('')
+          rest
+            .map(
+              (s,i)=>
+                renderMagazineStory(
+                  s,
+                  i+1
+                )
+            )
+            .join('')
         }
       </div>
 
-      ${renderClosing(page,'magazine-closing')}
+      ${
+        renderClosing(
+          page,
+          'magazine-closing'
+        )
+      }
 
     </main>
   `;
 }
 
 /* =========================================================
-   其余四套暂时保留通用 Renderer
+   04 ICE
 ========================================================= */
 
-function renderGeneric(
-  page,
-  plan,
-  variant
-){
-  const mods=
-    page.sections
-      .map(section)
-      .join('');
+function iceSection(s,n){
+  const compact=
+    s.items.slice(0,4);
 
-  const chips=
-    plan.constraints
-      .slice(0,6)
-      .map(
-        x=>`<i>${esc(x)}</i>`
-      )
-      .join('');
+  let body='';
 
-  const nav=
-    page.sections
-      .map((s,i)=>`
-        <a href="#module-${i}">
-          ${
-            String(i+1)
-              .padStart(2,'0')
-          }
-          ${esc(s.heading)}
-        </a>
-      `)
-      .join('');
+  if(
+    ['table','comparison']
+      .includes(s.type)
+  ){
+    body=table(
+      s.rows,
+      s.type==='comparison'
+    );
+  }
+
+  else if(
+    s.type==='barChart'
+  ){
+    body=chart(s.rows);
+  }
+
+  else if(
+    s.type==='calculator'
+  ){
+    body=calculator(s,n);
+  }
+
+  else if(
+    s.type==='checklist'
+  ){
+    body=`
+      <div class="ice-checklist">
+        ${
+          compact
+            .map((x,j)=>`
+              <label>
+                <input
+                  type="checkbox"
+                  data-check="${n}-${j}"
+                  ${
+                    checks.has(n+'-'+j)
+                      ? 'checked'
+                      : ''
+                  }
+                >
+
+                <span>
+                  ${esc(x)}
+                </span>
+              </label>
+            `)
+            .join('')
+        }
+      </div>
+    `;
+  }
+
+  else{
+    body=`
+      <div class="ice-points">
+        ${
+          compact
+            .map((x,i)=>`
+              <div>
+                <b>
+                  ${
+                    String(i+1)
+                      .padStart(2,'0')
+                  }
+                </b>
+
+                <span>
+                  ${esc(x)}
+                </span>
+              </div>
+            `)
+            .join('')
+        }
+      </div>
+    `;
+  }
 
   return `
-    ${renderToolbar(layouts[variant.layout][0])}
+    <section
+      class="ice-section"
+      id="module-${n}"
+    >
+      <div class="ice-section-head">
+        <span>
+          ${
+            String(n+1)
+              .padStart(2,'0')
+          }
+        </span>
 
-    <div class="paper">
+        <h2>
+          ${esc(s.heading)}
+        </h2>
+      </div>
 
-      <div class="tape"></div>
+      <p>
+        ${esc(s.intro)}
+      </p>
 
-      <div class="hero">
-        <p>
-          ✦ A Liquid Intelligent Page
-        </p>
+      ${body}
+
+      ${actionLinks(s.links)}
+
+      ${factNote(s.factIds)}
+    </section>
+  `;
+}
+
+function renderIce(
+  page,
+  plan
+){
+  const facts=
+    (plan.sharedFacts||[])
+      .slice(0,3);
+
+  const metrics=[
+    [
+      '约束',
+      String(
+        plan.constraints.length
+      ).padStart(2,'0')
+    ],
+    [
+      '模块',
+      String(
+        page.sections.length
+      ).padStart(2,'0')
+    ],
+    [
+      '事实',
+      String(
+        (plan.sharedFacts||[]).length
+      ).padStart(2,'0')
+    ]
+  ];
+
+  return `
+    ${renderToolbar('ICE. 速览报')}
+
+    <main class="ice-page">
+
+      <header class="ice-topline">
+        <b>
+          ICE.
+        </b>
+
+        <span>
+          INTELLIGENT CONTENT
+          EXECUTIVE BRIEF
+        </span>
+
+        <i>
+          NO. 01
+        </i>
+      </header>
+
+      <section class="ice-hero">
+
+        <div>
+          <small>
+            THE ANSWER / 结论先行
+          </small>
+
+          <h1>
+            ${esc(page.title)}
+          </h1>
+
+          <p>
+            ${esc(page.subtitle)}
+          </p>
+        </div>
+
+        <aside>
+          ${
+            metrics
+              .map(([k,v])=>`
+                <div>
+                  <strong>
+                    ${v}
+                  </strong>
+
+                  <span>
+                    ${k}
+                  </span>
+                </div>
+              `)
+              .join('')
+          }
+        </aside>
+
+      </section>
+
+      <section class="ice-verdict">
+        <span>
+          RECOMMENDATION
+        </span>
+
+        <strong>
+          ${esc(page.summary)}
+        </strong>
+      </section>
+
+      <section class="ice-constraints">
+        <small>
+          HARD CONSTRAINTS
+        </small>
+
+        <div>
+          ${
+            plan.constraints
+              .slice(0,8)
+              .map(
+                x=>`<span>${esc(x)}</span>`
+              )
+              .join('')
+          }
+        </div>
+      </section>
+
+      ${
+        facts.length
+          ? `
+            <section class="ice-facts">
+              <small>
+                FACT CHECK
+              </small>
+
+              <div>
+                ${
+                  facts
+                    .map(f=>`
+                      <article>
+                        <b>
+                          ${esc(factStatus(f))}
+                        </b>
+
+                        <p>
+                          ${esc(f.statement)}
+                        </p>
+                      </article>
+                    `)
+                    .join('')
+                }
+              </div>
+            </section>
+          `
+          : ''
+      }
+
+      <div class="ice-sections">
+        ${
+          page.sections
+            .map(iceSection)
+            .join('')
+        }
+      </div>
+
+      <footer class="ice-footer">
+        BRIEF END ·
+        重要事实与价格请在行动前再次核实
+      </footer>
+
+    </main>
+  `;
+}
+
+/* =========================================================
+   05 MINIMAL
+========================================================= */
+
+function minimalContent(s,n){
+  if(
+    ['table','comparison']
+      .includes(s.type)
+  ){
+    return table(
+      s.rows,
+      s.type==='comparison'
+    );
+  }
+
+  if(
+    s.type==='barChart'
+  ){
+    return chart(s.rows);
+  }
+
+  if(
+    s.type==='calculator'
+  ){
+    return calculator(s,n);
+  }
+
+  if(
+    s.type==='checklist'
+  ){
+    return `
+      <div class="minimal-checklist">
+        ${
+          s.items
+            .map((x,j)=>`
+              <label>
+                <input
+                  type="checkbox"
+                  data-check="${n}-${j}"
+                  ${
+                    checks.has(n+'-'+j)
+                      ? 'checked'
+                      : ''
+                  }
+                >
+
+                <span>
+                  ${esc(x)}
+                </span>
+              </label>
+            `)
+            .join('')
+        }
+      </div>
+    `;
+  }
+
+  return `
+    <div class="minimal-copy">
+      ${
+        s.items
+          .map(
+            x=>`<p>${esc(x)}</p>`
+          )
+          .join('')
+      }
+    </div>
+  `;
+}
+
+function renderMinimal(
+  page,
+  plan
+){
+  return `
+    ${renderToolbar('留白阅读页')}
+
+    <main class="minimal-page">
+
+      <header class="minimal-cover">
+        <small>
+          LIQUID / FOCUS
+        </small>
 
         <h1>
           ${esc(page.title)}
         </h1>
 
-        <h3>
+        <p>
           ${esc(page.subtitle)}
-        </h3>
+        </p>
+      </header>
 
-        <div class="constraint-chips">
-          ${chips}
-        </div>
+      <section class="minimal-query">
+        <span>
+          问题
+        </span>
 
-        <blockquote>
-          ${esc(page.summary)}
-        </blockquote>
-      </div>
+        <p>
+          ${esc(query)}
+        </p>
+      </section>
 
-      <nav class="section-nav">
-        ${nav}
+      <blockquote class="minimal-summary">
+        ${esc(page.summary)}
+      </blockquote>
+
+      <nav class="minimal-nav">
+        ${
+          page.sections
+            .map((s,i)=>`
+              <a href="#module-${i}">
+                <span>
+                  ${
+                    String(i+1)
+                      .padStart(2,'0')
+                  }
+                </span>
+
+                ${esc(s.heading)}
+              </a>
+            `)
+            .join('')
+        }
       </nav>
 
-      <div class="modules">
-        ${mods}
-      </div>
+      <article class="minimal-essay">
 
-      ${renderClosing(page)}
+        ${
+          page.sections
+            .map((s,n)=>`
+              <section
+                class="minimal-section"
+                id="module-${n}"
+              >
+                <small>
+                  ${
+                    String(n+1)
+                      .padStart(2,'0')
+                  }
+                  /
+                  ${esc(s.type.toUpperCase())}
+                </small>
 
-    </div>
+                <h2>
+                  ${esc(s.heading)}
+                </h2>
+
+                <p class="minimal-intro">
+                  ${esc(s.intro)}
+                </p>
+
+                ${minimalContent(s,n)}
+
+                ${actionLinks(s.links)}
+
+                ${factNote(s.factIds)}
+              </section>
+            `)
+            .join('')
+        }
+
+      </article>
+
+      <footer class="minimal-footer">
+        <span>
+          NOTES
+        </span>
+
+        <p>
+          ${esc(plan.constraints.join(' · '))}
+        </p>
+
+        <small>
+          重要事实与价格请在行动前再次核实。
+        </small>
+      </footer>
+
+    </main>
   `;
 }
 
 /* =========================================================
-   统一事件绑定
+   06 APP
+========================================================= */
+
+function appSectionBody(s,n){
+  if(
+    ['table','comparison']
+      .includes(s.type)
+  ){
+    return table(
+      s.rows,
+      s.type==='comparison'
+    );
+  }
+
+  if(
+    s.type==='barChart'
+  ){
+    return chart(s.rows);
+  }
+
+  if(
+    s.type==='calculator'
+  ){
+    return calculator(s,n);
+  }
+
+  if(
+    s.type==='checklist'
+  ){
+    return `
+      <div class="app-checklist">
+        ${
+          s.items
+            .map((x,j)=>`
+              <label>
+                <input
+                  type="checkbox"
+                  data-check="${n}-${j}"
+                  ${
+                    checks.has(n+'-'+j)
+                      ? 'checked'
+                      : ''
+                  }
+                >
+
+                <span>
+                  ${esc(x)}
+                </span>
+
+                <i>
+                  ${
+                    checks.has(n+'-'+j)
+                      ? 'DONE'
+                      : 'TODO'
+                  }
+                </i>
+              </label>
+            `)
+            .join('')
+        }
+      </div>
+    `;
+  }
+
+  if(
+    s.type==='cards'
+  ){
+    return `
+      <div class="app-cards">
+        ${
+          s.items
+            .map((x,i)=>`
+              <article>
+                <span>
+                  ${
+                    [
+                      '✓',
+                      '→',
+                      '★',
+                      '!'
+                    ][i%4]
+                  }
+                </span>
+
+                <p>
+                  ${esc(x)}
+                </p>
+              </article>
+            `)
+            .join('')
+        }
+      </div>
+    `;
+  }
+
+  return `
+    <ul class="app-list">
+      ${
+        s.items
+          .map(x=>`
+            <li>
+              <span>
+                •
+              </span>
+
+              ${esc(x)}
+            </li>
+          `)
+          .join('')
+      }
+    </ul>
+  `;
+}
+
+function renderApp(
+  page,
+  plan
+){
+  const total=
+    page.sections.length;
+
+  const done=
+    Math.max(
+      1,
+      Math.round(total*.55)
+    );
+
+  const progress=
+    Math.round(
+      done/total*100
+    );
+
+  return `
+    ${renderToolbar('任务工作台')}
+
+    <main class="app-shell">
+
+      <aside class="app-sidebar">
+
+        <div class="app-logo">
+          <span>
+            LIQUID
+          </span>
+
+          <b>
+            Workspace
+          </b>
+        </div>
+
+        <div class="app-progress">
+          <small>
+            任务进度
+          </small>
+
+          <strong>
+            ${progress}%
+          </strong>
+
+          <i>
+            <b
+              style="width:${progress}%"
+            ></b>
+          </i>
+        </div>
+
+        <nav>
+          ${
+            page.sections
+              .map((s,i)=>`
+                <a href="#module-${i}">
+                  <span>
+                    ${
+                      String(i+1)
+                        .padStart(2,'0')
+                    }
+                  </span>
+
+                  ${esc(s.heading)}
+                </a>
+              `)
+              .join('')
+          }
+        </nav>
+
+        <div class="app-sidebar-note">
+          <small>
+            原始需求
+          </small>
+
+          <p>
+            ${esc(clip(query,160))}
+          </p>
+        </div>
+
+      </aside>
+
+      <section class="app-main">
+
+        <header class="app-header">
+
+          <div>
+            <small>
+              DECISION WORKSPACE
+            </small>
+
+            <h1>
+              ${esc(page.title)}
+            </h1>
+
+            <p>
+              ${esc(page.subtitle)}
+            </p>
+          </div>
+
+          <button type="button">
+            ● READY
+          </button>
+
+        </header>
+
+        <section class="app-overview">
+
+          <div class="app-recommend">
+            <small>
+              核心结论
+            </small>
+
+            <strong>
+              ${esc(page.summary)}
+            </strong>
+          </div>
+
+          <div class="app-kpis">
+
+            <article>
+              <b>
+                ${plan.constraints.length}
+              </b>
+
+              <span>
+                约束
+              </span>
+            </article>
+
+            <article>
+              <b>
+                ${page.sections.length}
+              </b>
+
+              <span>
+                任务块
+              </span>
+            </article>
+
+            <article>
+              <b>
+                ${(plan.sharedFacts||[]).length}
+              </b>
+
+              <span>
+                事实
+              </span>
+            </article>
+
+          </div>
+
+        </section>
+
+        <section class="app-constraints">
+          <h3>
+            当前条件
+          </h3>
+
+          <div>
+            ${
+              plan.constraints
+                .slice(0,8)
+                .map(
+                  x=>`<span>${esc(x)}</span>`
+                )
+                .join('')
+            }
+          </div>
+        </section>
+
+        <div class="app-workspace">
+
+          ${
+            page.sections
+              .map((s,n)=>`
+                <section
+                  class="app-panel"
+                  id="module-${n}"
+                >
+                  <header>
+                    <div>
+                      <small>
+                        STEP ${
+                          String(n+1)
+                            .padStart(2,'0')
+                        }
+                      </small>
+
+                      <h2>
+                        ${esc(s.heading)}
+                      </h2>
+                    </div>
+
+                    <span>
+                      ${esc(s.type)}
+                    </span>
+                  </header>
+
+                  <p class="app-panel-intro">
+                    ${esc(s.intro)}
+                  </p>
+
+                  ${appSectionBody(s,n)}
+
+                  ${actionLinks(s.links)}
+
+                  ${factNote(s.factIds)}
+                </section>
+              `)
+              .join('')
+          }
+
+        </div>
+
+      </section>
+
+    </main>
+  `;
+}
+
+/* =========================================================
+   07 NEON
+========================================================= */
+
+function neonSection(s,n){
+  let body='';
+
+  if(
+    ['table','comparison']
+      .includes(s.type)
+  ){
+    body=table(
+      s.rows,
+      s.type==='comparison'
+    );
+  }
+
+  else if(
+    s.type==='barChart'
+  ){
+    body=chart(s.rows);
+  }
+
+  else if(
+    s.type==='calculator'
+  ){
+    body=calculator(s,n);
+  }
+
+  else if(
+    s.type==='checklist'
+  ){
+    body=`
+      <div class="neon-checklist">
+        ${
+          s.items
+            .map((x,j)=>`
+              <label>
+                <input
+                  type="checkbox"
+                  data-check="${n}-${j}"
+                  ${
+                    checks.has(n+'-'+j)
+                      ? 'checked'
+                      : ''
+                  }
+                >
+
+                <span>
+                  ${esc(x)}
+                </span>
+              </label>
+            `)
+            .join('')
+        }
+      </div>
+    `;
+  }
+
+  else{
+    body=`
+      <div class="neon-points">
+        ${
+          s.items
+            .slice(0,6)
+            .map((x,i)=>`
+              <article>
+                <b>
+                  ${
+                    String(i+1)
+                      .padStart(2,'0')
+                  }
+                </b>
+
+                <p>
+                  ${esc(x)}
+                </p>
+              </article>
+            `)
+            .join('')
+        }
+      </div>
+    `;
+  }
+
+  return `
+    <section
+      class="neon-panel"
+      id="module-${n}"
+    >
+      <header>
+        <span>
+          MODULE_${
+            String(n+1)
+              .padStart(2,'0')
+          }
+        </span>
+
+        <h2>
+          ${esc(s.heading)}
+        </h2>
+
+        <i>
+          LIVE
+        </i>
+      </header>
+
+      <p>
+        ${esc(s.intro)}
+      </p>
+
+      ${body}
+
+      ${actionLinks(s.links)}
+
+      ${factNote(s.factIds)}
+    </section>
+  `;
+}
+
+function renderNeon(
+  page,
+  plan
+){
+  const status=
+    (plan.sharedFacts||[])
+      .reduce((a,f)=>{
+        a[f.status]=
+          (a[f.status]||0)+1;
+
+        return a;
+      },{});
+
+  const score=
+    Math.min(
+      99,
+      70+
+      Math.min(
+        20,
+        plan.constraints.length*3
+      )+
+      Math.min(
+        9,
+        page.sections.length
+      )
+    );
+
+  return `
+    ${renderToolbar('数据驾驶舱')}
+
+    <main class="neon-page">
+
+      <header class="neon-header">
+
+        <div>
+          <span>
+            LIQUID // COMMAND CENTER
+          </span>
+
+          <i>
+            ● LIVE
+          </i>
+        </div>
+
+        <h1>
+          ${esc(page.title)}
+        </h1>
+
+        <p>
+          ${esc(page.subtitle)}
+        </p>
+
+      </header>
+
+      <section class="neon-kpis">
+
+        <article class="neon-score">
+          <small>
+            DECISION SCORE
+          </small>
+
+          <strong>
+            ${score}
+          </strong>
+
+          <span>
+            / 100
+          </span>
+        </article>
+
+        <article>
+          <small>
+            CONSTRAINTS
+          </small>
+
+          <strong>
+            ${
+              String(
+                plan.constraints.length
+              ).padStart(2,'0')
+            }
+          </strong>
+
+          <span>
+            LOCKED
+          </span>
+        </article>
+
+        <article>
+          <small>
+            VERIFIED
+          </small>
+
+          <strong>
+            ${
+              String(
+                status.verified||0
+              ).padStart(2,'0')
+            }
+          </strong>
+
+          <span>
+            FACTS
+          </span>
+        </article>
+
+        <article>
+          <small>
+            UNVERIFIED
+          </small>
+
+          <strong>
+            ${
+              String(
+                status.unverified||0
+              ).padStart(2,'0')
+            }
+          </strong>
+
+          <span>
+            CHECK
+          </span>
+        </article>
+
+      </section>
+
+      <section class="neon-command">
+
+        <div>
+          <small>
+            PRIMARY OUTPUT
+          </small>
+
+          <strong>
+            ${esc(page.summary)}
+          </strong>
+        </div>
+
+        <aside>
+          ${
+            plan.constraints
+              .slice(0,5)
+              .map((x,i)=>`
+                <span>
+                  <b>
+                    0${i+1}
+                  </b>
+
+                  ${esc(x)}
+                </span>
+              `)
+              .join('')
+          }
+        </aside>
+
+      </section>
+
+      <div class="neon-grid">
+        ${
+          page.sections
+            .map(neonSection)
+            .join('')
+        }
+      </div>
+
+      <footer class="neon-footer">
+        <span>
+          DATA STREAM COMPLETE
+        </span>
+
+        <i>
+          重要事实与价格请在行动前再次核实
+        </i>
+      </footer>
+
+    </main>
+  `;
+}
+
+/* =========================================================
+   Calculator / Events
 ========================================================= */
 
 function updateCalc(){
   document
-    .querySelectorAll('.calculator')
+    .querySelectorAll(
+      '.calculator'
+    )
     .forEach(box=>{
       const v=
-        [...box.querySelectorAll('input')]
-          .map(
-            x=>Number(x.value)
-          );
+        [
+          ...box.querySelectorAll(
+            'input'
+          )
+        ]
+        .map(
+          x=>Number(x.value)
+        );
 
       const total=
         box.dataset.formula==='product'
@@ -1634,45 +2752,51 @@ function bindResultEvents(){
     save();
   };
 
-  $('#fresh').onclick=reset;
+  $('#fresh').onclick=
+    reset;
 
   $('#result').oninput=e=>{
     if(
-      e.target.matches(
+      !e.target.matches(
         '.calculator input'
       )
     ){
-      const out=
-        e.target
-          .previousElementSibling;
-
-      if(out){
-        out.value=
-          `${e.target.value} ${
-            e.target.dataset.unit
-          }`;
-      }
-
-      controls.set(
-        active,
-        {
-          ...(controls.get(active)||{}),
-          [
-            e.target.dataset.field
-          ]:e.target.value
-        }
-      );
-
-      updateCalc();
-      save();
+      return;
     }
+
+    const out=
+      e.target
+        .previousElementSibling;
+
+    if(out){
+      out.value=
+        `${e.target.value} ${
+          e.target.dataset.unit
+        }`;
+    }
+
+    controls.set(
+      active,
+      {
+        ...(controls.get(active)||{}),
+        [
+          e.target.dataset.field
+        ]:e.target.value
+      }
+    );
+
+    updateCalc();
+
+    save();
   };
 
   $('#result').onchange=e=>{
     const k=
       e.target.dataset.check;
 
-    if(!k)return;
+    if(!k){
+      return;
+    }
 
     if(e.target.checked){
       checks.add(k);
@@ -1689,14 +2813,20 @@ function bindResultEvents(){
         '[data-choice]'
       );
 
-    if(!row)return;
+    if(!row){
+      return;
+    }
 
     const container=
       row.closest(
         '.module,'+
         '.terminal-block,'+
         '.magazine-story,'+
-        '.magazine-feature'
+        '.magazine-feature,'+
+        '.ice-section,'+
+        '.minimal-section,'+
+        '.app-panel,'+
+        '.neon-panel'
       );
 
     const result=
@@ -1718,7 +2848,7 @@ function bindResultEvents(){
 }
 
 /* =========================================================
-   Renderer Router
+   七种独立 Renderer Router
 ========================================================= */
 
 function show(){
@@ -1728,18 +2858,18 @@ function show(){
   const renderers={
     hand:renderHand,
     terminal:renderTerminal,
-    magazine:renderMagazine
+    magazine:renderMagazine,
+    ice:renderIce,
+    minimal:renderMinimal,
+    app:renderApp,
+    neon:renderNeon
   };
 
-  const renderer=
-    renderers[v.layout]||
-    renderGeneric;
-
   $('#result').className=
-    `result layout-${v.layout} theme-${v.layout}`;
+    `result layout-${v.layout}`;
 
   $('#result').innerHTML=
-    renderer(
+    renderers[v.layout](
       page,
       plan,
       v
@@ -1755,7 +2885,7 @@ function show(){
 }
 
 /* =========================================================
-   Loading / 请求
+   请求 / Loading
 ========================================================= */
 
 function loading(on,i){
@@ -1777,7 +2907,9 @@ function loading(on,i){
 
     box.innerHTML=`
       <div>
-        <span>✦</span>
+        <span>
+          ✦
+        </span>
 
         <h2>
           正在展开「${
@@ -1803,9 +2935,13 @@ function loading(on,i){
       </div>
     `;
 
-    box.classList.add('show');
+    box.classList.add(
+      'show'
+    );
   }else{
-    box?.classList.remove('show');
+    box?.classList.remove(
+      'show'
+    );
   }
 }
 
@@ -1834,15 +2970,19 @@ async function openVariant(i){
           '/api/page',
           {
             method:'POST',
+
             headers:{
               'Content-Type':
                 'application/json'
             },
-            body:JSON.stringify({
-              sessionId:
-                plan.sessionId,
-              variantIndex:i
-            }),
+
+            body:
+              JSON.stringify({
+                sessionId:
+                  plan.sessionId,
+                variantIndex:i
+              }),
+
             signal:
               AbortSignal.timeout(
                 110000
@@ -1861,9 +3001,8 @@ async function openVariant(i){
       }
 
       /*
-       * 关键逻辑：
-       * 七种形式共用同一份内容数据。
-       * 只由前端 Renderer 改变表现形式。
+       * 七套页面共用同一份内容数据。
+       * Renderer 只改变表现形式。
        */
       for(
         let n=0;
@@ -1872,11 +3011,13 @@ async function openVariant(i){
       ){
         pages.set(n,d);
       }
+
     }catch(e){
-      $('#plan-error').textContent=
-        e.name==='TimeoutError'
-          ? '生成时间较长，请再次点击重试。'
-          : e.message;
+      $('#plan-error')
+        .textContent=
+          e.name==='TimeoutError'
+            ? '生成时间较长，请再次点击重试。'
+            : e.message;
     }finally{
       busy=false;
 
@@ -1923,7 +3064,7 @@ function reset(){
 }
 
 /* =========================================================
-   页面事件
+   Selection events
 ========================================================= */
 
 $('#form-grid').onclick=e=>{
@@ -1941,26 +3082,37 @@ $('#form-grid').onclick=e=>{
   }
 };
 
-$('#new-query').onclick=reset;
+$('#new-query').onclick=
+  reset;
+
+/* =========================================================
+   Generate Query
+========================================================= */
 
 $('#query-form').onsubmit=
   async e=>{
     e.preventDefault();
 
-    if(busy)return;
+    if(busy){
+      return;
+    }
 
     const q=
       $('#query')
         .value
         .trim();
 
-    if(!q)return;
+    if(!q){
+      return;
+    }
 
     busy=true;
 
-    $('#generate').disabled=true;
+    $('#generate').disabled=
+      true;
 
-    $('#error').textContent='';
+    $('#error').textContent=
+      '';
 
     $('#generate').textContent=
       '正在理解需求与组织统一答案…';
@@ -1971,13 +3123,17 @@ $('#query-form').onsubmit=
           '/api/plan',
           {
             method:'POST',
+
             headers:{
               'Content-Type':
                 'application/json'
             },
-            body:JSON.stringify({
-              query:q
-            }),
+
+            body:
+              JSON.stringify({
+                query:q
+              }),
+
             signal:
               AbortSignal.timeout(
                 110000
@@ -1996,6 +3152,7 @@ $('#query-form').onsubmit=
       }
 
       plan=d;
+
       query=q;
 
       pages.clear();
@@ -2015,15 +3172,19 @@ $('#query-form').onsubmit=
       go('selection');
 
       save();
+
     }catch(e){
-      $('#error').textContent=
-        e.name==='TimeoutError'
-          ? '服务响应较慢，请再试一次。'
-          : e.message;
+      $('#error')
+        .textContent=
+          e.name==='TimeoutError'
+            ? '服务响应较慢，请再试一次。'
+            : e.message;
+
     }finally{
       busy=false;
 
-      $('#generate').disabled=false;
+      $('#generate').disabled=
+        false;
 
       $('#generate').textContent=
         '✦ 让 AI 生成专属网页';
@@ -2031,7 +3192,7 @@ $('#query-form').onsubmit=
   };
 
 /* =========================================================
-   恢复上一次状态
+   Restore
 ========================================================= */
 
 async function restore(){
@@ -2052,9 +3213,11 @@ async function restore(){
     return;
   }
 
-  query=s.query||'';
+  query=
+    s.query||'';
 
-  $('#query').value=query;
+  $('#query').value=
+    query;
 
   try{
     const r=
@@ -2072,7 +3235,9 @@ async function restore(){
       throw Error();
     }
 
-    plan={...fresh};
+    plan={
+      ...fresh
+    };
 
     delete plan.pages;
 
@@ -2121,7 +3286,8 @@ async function restore(){
       s.showResult&&
       pages.has(s.active)
     ){
-      active=s.active;
+      active=
+        s.active;
 
       page=
         pages.get(active);
@@ -2134,9 +3300,11 @@ async function restore(){
     }else{
       go('selection');
     }
+
   }catch{
-    $('#error').textContent=
-      '上次方案已过期，原 Query 已为你保留，请重新生成。';
+    $('#error')
+      .textContent=
+        '上次方案已过期，原 Query 已为你保留，请重新生成。';
 
     localStorage.removeItem(
       storeKey
@@ -2145,6 +3313,10 @@ async function restore(){
     go('start');
   }
 }
+
+/* =========================================================
+   Health
+========================================================= */
 
 fetch('/api/health')
   .then(
