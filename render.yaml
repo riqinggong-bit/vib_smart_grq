@@ -10,8 +10,10 @@ services:
       - key: NODE_VERSION
         value: 24.18.0
       - key: GEMINI_MODEL
-        value: gemini-3.6-flash
+        value: gemini-2.5-flash
       - key: GEMINI_API_KEY
         sync: false
+      - key: GEMINI_BASE_URL
+        value: https://api.openai-proxy.org/google
       - key: REQUESTS_PER_HOUR
         value: 30
