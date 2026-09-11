@@ -15,5 +15,7 @@ services:
         sync: false
       - key: GEMINI_BASE_URL
         value: https://api.openai-proxy.org/google
+      - key: GEMINI_ENABLE_GROUNDING
+        value: false
       - key: REQUESTS_PER_HOUR
         value: 30
