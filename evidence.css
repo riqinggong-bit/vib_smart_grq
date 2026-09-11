@@ -1,0 +1,15 @@
+.fact-note>summary{font-weight:800}
+.claim{margin-top:10px;background:#f3f1e7;border:1px solid #d6d1bd;padding:10px}
+.claim>summary{display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:center;cursor:pointer}
+.claim b{border-radius:999px;background:#ece6d0;color:#856334;padding:4px 8px;font-size:11px}
+.claim .status-verified{background:#dff1df;color:#267142}
+.claim .status-unverified{background:#ffe5dc;color:#b7472d}
+.evidence-list{display:grid;gap:10px;margin-top:12px}
+.evidence-list article{background:#fffdf8;border-left:4px solid var(--accent);padding:12px 14px}
+.evidence-list div{display:flex;justify-content:space-between;gap:12px}
+.evidence-list i{font-style:normal;color:#89968d}
+.evidence-list blockquote{margin:10px 0;padding:10px 12px;background:#f6f2e6;color:#59665e;line-height:1.6}
+.evidence-list small{display:block;color:#89968d;margin-bottom:8px}
+.evidence-list a{color:var(--accent);font-weight:800;text-decoration:none}
+.evidence-empty{margin-top:12px;background:#fff1e9;color:#a13f28;padding:12px 14px}
+@media(max-width:520px){.claim>summary{grid-template-columns:1fr}.evidence-list div{display:block}}
