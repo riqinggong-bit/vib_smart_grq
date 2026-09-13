@@ -9,7 +9,7 @@ const closeAIBase=(process.env.CLOSEAI_BASE_URL||'https://api.openai-proxy.org/v
 const requestLimit=Math.max(1,Number(process.env.REQUESTS_PER_HOUR)||30),rateWindow=60*60*1000,requestLog=new Map();
 
 const layouts=['hand','terminal','magazine','ice','minimal','app','neon'];
-const types=['narrative','steps','cards','table','checklist','timeline','comparison','calculator','barChart'];
+const types=['narrative','steps','cards','table','checklist','timeline','comparison','calculator','barChart','image','image_gallery','product_image'];
 
 const factSchema={
  type:'object',
@@ -21,7 +21,7 @@ const factSchema={
   kind:{type:'string',enum:['user','fact','assumption','calculation']},
   status:{type:'string',enum:['provided','verified','unverified']},
   source:{type:'string'}
- }
+	 }
 };
 
 const planSchema={
@@ -75,9 +75,9 @@ const planSchema={
      }
     }
    }
-  }
- }
-};
+	 }
+		}
+	};
 
 const pageSchema={
  type:'object',
@@ -102,7 +102,8 @@ const pageSchema={
      'rows',
      'resultLabel',
      'factIds',
-     'links'
+     'links',
+     'media'
     ],
     properties:{
      type:{
@@ -143,11 +144,40 @@ const pageSchema={
         }
        }
       }
+     },
+     media:{
+      type:'array',
+      maxItems:12,
+      items:{
+       type:'object',
+       additionalProperties:false,
+       required:[
+        'url',
+        'title',
+        'caption',
+        'source',
+        'sourceUrl',
+        'entity',
+        'factIds'
+       ],
+       properties:{
+        url:{type:'string'},
+        title:{type:'string'},
+        caption:{type:'string'},
+        source:{type:'string'},
+        sourceUrl:{type:'string'},
+        entity:{type:'string'},
+        factIds:{
+         type:'array',
+         items:{type:'string'}
+        }
+       }
      }
     }
    }
   }
  }
+}
 };
 
 function textOf(o){
@@ -360,6 +390,36 @@ function imageParts(images=[]){
   : [];
 }
 
+function normalizeMedia(list=[]){
+ return Array.isArray(list)
+  ? list
+   .filter(x=>
+    x&&
+    typeof x.url==='string'&&
+    /^https?:\/\//.test(x.url)
+   )
+   .slice(0,12)
+   .map(x=>({
+    url:x.url,
+    title:clean(
+     x.title||x.entity||'参考图片',
+     80
+    ),
+    caption:clean(x.caption||'',160),
+    source:clean(x.source||'',80),
+    sourceUrl:/^https?:\/\//.test(x.sourceUrl||'')
+     ? x.sourceUrl
+     : '',
+    entity:clean(x.entity||'',80),
+    factIds:Array.isArray(x.factIds)
+     ? x.factIds
+      .filter(y=>typeof y==='string')
+      .slice(0,8)
+     : []
+   }))
+  : [];
+}
+
 function parsePlan(o){
  const p=jsonOf(o,'方案');
  const v=p?.variants;
@@ -520,6 +580,20 @@ function parsePage(o){
      'jd',
      'taobao'
     ].includes(x.channel)
+   )&&
+   Array.isArray(s.media)&&
+   s.media.every(x=>
+    x&&
+    typeof x.url==='string'&&
+    typeof x.title==='string'&&
+    typeof x.caption==='string'&&
+    typeof x.source==='string'&&
+    typeof x.sourceUrl==='string'&&
+    typeof x.entity==='string'&&
+    Array.isArray(x.factIds)&&
+    x.factIds.every(y=>
+     typeof y==='string'
+    )
    )
   )
  ){
@@ -529,6 +603,8 @@ function parsePage(o){
  }
 
  for(const s of p.sections){
+  s.media=normalizeMedia(s.media);
+
   s.formula=
    ['sum','product']
     .includes(s.items[0])
@@ -1058,10 +1134,10 @@ async function requestModel(
 }
 
 const planPrompt=
- '理解用户真正要完成的任务，提取全部硬约束，并规划恰好七种呈现同一份最终答案的网页形态。七种形态依次对应 hand、terminal、magazine、ice、minimal、app、neon；它们只改变叙事顺序、视觉重点与交互方式，不得改变事实、计算、候选项或最终结论。sharedFacts 是统一事实账本：用户内容标 user/provided，无法核实的外部信息标 fact/unverified，假设标 assumption/unverified，计算标 calculation/provided；只有能由搜索引用元数据支撑的外部事实才允许最终升级为 verified；不得伪造来源、价格、库存、参数或商品详情 URL。每个形态给出适合的阅读场景、重点、相同交付目标、3至6节统一内容大纲与有效组件。严格限制文字，中文，不追问。';
+ '理解用户真正要完成的任务，提取全部硬约束，并规划恰好七种呈现同一份最终答案的网页形态。七种形态依次对应 hand、terminal、magazine、ice、minimal、app、neon；它们只改变叙事顺序、视觉重点与交互方式，不得改变事实、计算、候选项或最终结论。sharedFacts 是统一事实账本：用户内容标 user/provided，无法核实的外部信息标 fact/unverified，假设标 assumption/unverified，计算标 calculation/provided；只有能由搜索引用元数据支撑的外部事实才允许最终升级为 verified；不得伪造来源、价格、库存、参数或商品详情 URL。每个形态给出适合的阅读场景、重点、相同交付目标、3至6节统一内容大纲与有效组件；当用户上传图片、要求配图、商品图片或多图比较时，可选择image、image_gallery、product_image组件。严格限制文字，中文，不追问。';
 
 const pagePrompt=
- '生成一份真正完成用户任务的统一内容结果，之后会被七种界面共同渲染。必须保留全部约束，先给关键判断，再展示思考路径、可比较的信息、可执行步骤与最终选择。若任务涉及购买、品牌或服务选择：至少列出3个不同品牌或候选项，分别写清适用人群、关键区别、风险和待核实参数；在相关section的links中为每个候选项给出搜索入口，label写候选名称，query写完整品牌型号关键词，channel在official、jd、taobao中选择，至少同时覆盖京东和淘宝。系统会安全生成站内搜索链接，不得编造商品详情URL。非购买任务的links返回空数组。所有外部事实必须来自sharedFacts；无法核实的参数或价格明确写待核实，不得伪造来源或精确数据。内容要具体。calculator用rows表示输入字段，第一行固定为[名称,初值,最小值,最大值,步长,单位]；items第一项只用sum或product。comparison/table/barChart使用rows且第一行表头，barChart第二列为数字。checklist/timeline/steps/cards用items。未使用字段返回空数组。用中文。';
+ '生成一份真正完成用户任务的统一内容结果，之后会被七种界面共同渲染。必须保留全部约束，先给关键判断，再展示思考路径、可比较的信息、可执行步骤与最终选择。若任务涉及购买、品牌或服务选择：至少列出3个不同品牌或候选项，分别写清适用人群、关键区别、风险和待核实参数；在相关section的links中为每个候选项给出搜索入口，label写候选名称，query写完整品牌型号关键词，channel在official、jd、taobao中选择，至少同时覆盖京东和淘宝。系统会安全生成站内搜索链接，不得编造商品详情URL。当用户上传图片时必须读取图片中的文字、物体、界面、布局、颜色和可见结构，并把观察结果纳入判断；看不清的内容标为图片信息待核实。若需要展示图片组件，可使用type=image、image_gallery或product_image；media里只能填写真实可访问的图片URL，必须带title、caption、source、sourceUrl、entity和factIds；没有真实图片URL时media返回空数组，不得编造图片URL。product_image用于商品/品牌/型号图片，image_gallery用于多图参考，image用于单张解释图。非图片组件的media也返回空数组。所有外部事实必须来自sharedFacts；无法核实的参数或价格明确写待核实，不得伪造来源或精确数据。内容要具体。calculator用rows表示输入字段，第一行固定为[名称,初值,最小值,最大值,步长,单位]；items第一项只用sum或product。comparison/table/barChart使用rows且第一行表头，barChart第二列为数字。checklist/timeline/steps/cards用items。未使用字段返回空数组。用中文。';
 
 const planQuery=
  (q,images=[])=>requestModel(

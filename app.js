@@ -609,6 +609,103 @@ function actionLinks(links=[]){
   `;
 }
 
+function mediaSource(m){
+  let host='图片来源';
+
+  try{
+    host=new URL(m.sourceUrl).hostname;
+  }catch{}
+
+  const text=
+    m.source||
+    (
+      m.sourceUrl
+        ? host
+        : '图片来源'
+    );
+
+  return m.sourceUrl
+    ? `
+      <a
+        href="${esc(m.sourceUrl)}"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        ${esc(text)}
+      </a>
+    `
+    : `<span>${esc(text)}</span>`;
+}
+
+function mediaCard(m,product=false){
+  return `
+    <figure class="${product?'product-media-card':'media-card'}">
+      <img
+        src="${esc(m.url)}"
+        alt="${esc(m.title||m.entity||'参考图片')}"
+        loading="lazy"
+      >
+
+      <figcaption>
+        ${
+          m.entity
+            ? `<small>${esc(m.entity)}</small>`
+            : ''
+        }
+
+        <b>
+          ${esc(m.title||'参考图片')}
+        </b>
+
+        ${
+          m.caption
+            ? `<p>${esc(m.caption)}</p>`
+            : ''
+        }
+
+        <em>
+          来源：${mediaSource(m)}
+        </em>
+      </figcaption>
+    </figure>
+  `;
+}
+
+function mediaBlock(s){
+  const media=
+    Array.isArray(s.media)
+      ? s.media
+      : [];
+
+  if(!media.length){
+    return `
+      <div class="media-empty">
+        没有可验证图片 URL，因此不展示图片。
+      </div>
+    `;
+  }
+
+  if(s.type==='image_gallery'){
+    return `
+      <div class="media-gallery">
+        ${
+          media.map(m=>mediaCard(m)).join('')
+        }
+      </div>
+    `;
+  }
+
+  return `
+    <div class="${s.type==='product_image'?'product-media-grid':'media-single'}">
+      ${
+        media
+          .map(m=>mediaCard(m,s.type==='product_image'))
+          .join('')
+      }
+    </div>
+  `;
+}
+
 function section(s,n){
   let c='';
 
@@ -686,6 +783,16 @@ function section(s,n){
     s.type==='barChart'
   ){
     c=chart(s.rows);
+  }
+
+  else if(
+    [
+      'image',
+      'image_gallery',
+      'product_image'
+    ].includes(s.type)
+  ){
+    c=mediaBlock(s);
   }
 
   else if(
