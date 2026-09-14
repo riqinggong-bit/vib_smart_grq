@@ -609,10 +609,6 @@ function actionLinks(links=[]){
   `;
 }
 
-/* =========================================================
-   图片 / 产品图
-========================================================= */
-
 function mediaSource(m){
   let host='图片来源';
 
@@ -650,44 +646,37 @@ function normalizeProductText(value=''){
     );
 }
 
-function productLinksForMedia(
-  m,
-  links=[]
-){
-  const entity=
-    normalizeProductText(
-      m.entity||
-      m.title||
-      ''
-    );
+function productLinksForMedia(m,links=[]){
+  const rawEntity=String(m.entity||m.title||'').trim();
+  const entity=normalizeProductText(rawEntity);
+  if(!entity)return [];
 
-  if(!entity){
-    return [];
-  }
-
-  return links
+  const matched=links
     .filter(x=>{
-      const text=
-        normalizeProductText(
-          `${
-            x.label||
-            ''
-          } ${
-            x.query||
-            ''
-          }`
-        );
-
+      const text=normalizeProductText(`${x.label||''} ${x.query||''}`);
       return text.includes(entity)||
         entity.includes(text)||
-        (
-          entity.length>=4&&
-          text.includes(
-            entity.slice(0,4)
-          )
-        );
+        (entity.length>=4&&text.includes(entity.slice(0,4)));
     })
     .slice(0,3);
+
+  /*
+   * 产品图卡自己保证至少有京东 / 淘宝两个安全搜索入口。
+   * 这里只拼搜索页，不伪造商品详情 URL。
+   */
+  const channels=new Set(matched.map(x=>x.channel));
+  for(const channel of ['jd','taobao']){
+    if(!channels.has(channel)){
+      matched.push({
+        label:rawEntity,
+        query:rawEntity,
+        channel
+      });
+      channels.add(channel);
+    }
+  }
+
+  return matched.slice(0,3);
 }
 
 function productMediaActions(
@@ -722,10 +711,7 @@ function productMediaActions(
                     ? '去淘宝看看'
                     : '查找官网'
               }
-
-              <span>
-                →
-              </span>
+              <span>→</span>
             </a>
           `)
           .join('')
@@ -740,128 +726,92 @@ function mediaCard(
   links=[]
 ){
   if(product){
+    const hasImage=typeof m.url==='string'&&m.url.trim();
+
     return `
       <article class="product-media-card">
-
         <div class="product-media-visual">
-
           <span class="product-media-badge">
-            产品参考图
+            ${hasImage?'产品参考图':'图片待核实'}
           </span>
 
-          <img
-            src="${esc(m.url)}"
-            alt="${esc(
-              m.title||
-              m.entity||
-              '产品图片'
-            )}"
-            loading="lazy"
-            referrerpolicy="no-referrer"
-          >
-
+          ${
+            hasImage
+              ? `
+                <img
+                  src="${esc(m.url)}"
+                  alt="${esc(
+                    m.title||
+                    m.entity||
+                    '产品图片'
+                  )}"
+                  loading="lazy"
+                  referrerpolicy="no-referrer"
+                  data-product-image="1"
+                >
+              `
+              : `
+                <div
+                  class="product-media-placeholder"
+                  data-product-placeholder="1"
+                  style="text-align:center;padding:28px 18px;line-height:1.7;"
+                >
+                  <strong style="display:block;font-size:15px;">
+                    暂无可信产品图
+                  </strong>
+                  <small style="display:block;opacity:.62;margin-top:6px;">
+                    已保留产品信息与安全购买入口
+                  </small>
+                </div>
+              `
+          }
         </div>
 
         <div class="product-media-copy">
-
           <small class="product-media-entity">
-            ${esc(
-              m.entity||
-              '候选产品'
-            )}
+            ${esc(m.entity||'候选产品')}
           </small>
 
           <h3>
-            ${esc(
-              m.title||
-              m.entity||
-              '候选产品'
-            )}
+            ${esc(m.title||m.entity||'候选产品')}
           </h3>
 
           ${
             m.caption
-              ? `
-                <p>
-                  ${esc(m.caption)}
-                </p>
-              `
+              ? `<p>${esc(m.caption)}</p>`
               : ''
           }
 
-          ${
-            productMediaActions(
-              m,
-              links
-            )
-          }
+          ${productMediaActions(m,links)}
 
           <div class="product-media-source">
-
-            <span>
-              图片来源
-            </span>
-
-            ${mediaSource(m)}
-
+            <span>图片来源</span>
+            ${
+              hasImage
+                ? mediaSource(m)
+                : '<span>暂未取得可语义验证的产品主图</span>'
+            }
           </div>
-
         </div>
-
       </article>
     `;
   }
 
   return `
     <figure class="media-card">
-
       <img
         src="${esc(m.url)}"
-        alt="${esc(
-          m.title||
-          m.entity||
-          '参考图片'
-        )}"
+        alt="${esc(m.title||m.entity||'参考图片')}"
         loading="lazy"
         referrerpolicy="no-referrer"
       >
 
       <figcaption>
-
-        ${
-          m.entity
-            ? `
-              <small>
-                ${esc(m.entity)}
-              </small>
-            `
-            : ''
-        }
-
-        <b>
-          ${esc(
-            m.title||
-            '参考图片'
-          )}
-        </b>
-
-        ${
-          m.caption
-            ? `
-              <p>
-                ${esc(m.caption)}
-              </p>
-            `
-            : ''
-        }
-
-        <em>
-          来源：
-          ${mediaSource(m)}
-        </em>
-
+        ${m.entity?`<small>${esc(m.entity)}</small>`:''}
+        <b>${esc(m.title||'参考图片')}</b>
+        ${m.caption?`<p>${esc(m.caption)}</p>`:''}
+        <em>来源：${mediaSource(m)}</em>
       </figcaption>
-
     </figure>
   `;
 }
@@ -875,14 +825,11 @@ function mediaBlock(s){
   if(!media.length){
     return `
       <div
-        class="
-          media-empty
-          ${
-            s.type==='product_image'
-              ? 'product-media-empty'
-              : ''
-          }
-        "
+        class="media-empty ${
+          s.type==='product_image'
+            ? 'product-media-empty'
+            : ''
+        }"
       >
         ${
           s.type==='product_image'
@@ -893,63 +840,43 @@ function mediaBlock(s){
     `;
   }
 
-  if(
-    s.type===
-    'image_gallery'
-  ){
+  if(s.type==='image_gallery'){
     return `
       <div class="media-gallery">
-
         ${
           media
-            .map(
-              m=>
-                mediaCard(m)
-            )
+            .map(m=>mediaCard(m))
             .join('')
         }
-
       </div>
     `;
   }
 
-  if(
-    s.type===
-    'product_image'
-  ){
+  if(s.type==='product_image'){
     return `
       <div class="product-media-grid">
-
         ${
           media
-            .map(
-              m=>
-                mediaCard(
-                  m,
-                  true,
-                  s.links||
-                  []
-                )
+            .map(m=>
+              mediaCard(
+                m,
+                true,
+                s.links||[]
+              )
             )
             .join('')
         }
-
       </div>
     `;
   }
 
   return `
     <div class="media-single">
-
       ${
         media
-          .map(
-            m=>
-              mediaCard(m)
-          )
+          .map(m=>mediaCard(m))
           .join('')
       }
-
     </div>
   `;
 }
@@ -959,9 +886,7 @@ function isMediaSection(s){
     'image',
     'image_gallery',
     'product_image'
-  ].includes(
-    s?.type
-  );
+  ].includes(s?.type);
 }
 
 function sectionActionLinks(s){
@@ -973,15 +898,8 @@ function sectionActionLinks(s){
     return '';
   }
 
-  return actionLinks(
-    s?.links||
-    []
-  );
+  return actionLinks(s?.links||[]);
 }
-
-/* =========================================================
-   通用 Section
-========================================================= */
 
 function section(s,n){
   let c='';
@@ -1063,7 +981,11 @@ function section(s,n){
   }
 
   else if(
-    isMediaSection(s)
+    [
+      'image',
+      'image_gallery',
+      'product_image'
+    ].includes(s.type)
   ){
     c=mediaBlock(s);
   }
@@ -3138,6 +3060,29 @@ function updateCalc(){
 }
 
 function bindResultEvents(){
+  /*
+   * 即使远端图片在生成页面后临时失效，也不展示破图。
+   * 运行时降级成“暂无可信产品图”。
+   */
+  document
+    .querySelectorAll('[data-product-image="1"]')
+    .forEach(img=>{
+      img.addEventListener('error',()=>{
+        const box=img.closest('.product-media-visual');
+        if(!box)return;
+        const badge=box.querySelector('.product-media-badge');
+        if(badge)badge.textContent='图片待核实';
+        img.remove();
+        if(!box.querySelector('[data-product-placeholder="1"]')){
+          const holder=document.createElement('div');
+          holder.className='product-media-placeholder';
+          holder.dataset.productPlaceholder='1';
+          holder.style.cssText='text-align:center;padding:28px 18px;line-height:1.7;';
+          holder.innerHTML='<strong style="display:block;font-size:15px;">暂无可信产品图</strong><small style="display:block;opacity:.62;margin-top:6px;">图片源暂时不可访问</small>';
+          box.append(holder);
+        }
+      },{once:true});
+    });
   const state=
     controls.get(active)||{};
 
@@ -3525,13 +3470,7 @@ function renderImageList(){
           `
             <span title="${esc(f.name)}">
               ${esc(clip(f.name,22))}
-              <button
-                type="button"
-                data-remove-image="${i}"
-                aria-label="删除 ${esc(f.name)}"
-              >
-                ×
-              </button>
+              <button type="button" data-remove-image="${i}" aria-label="删除 ${esc(f.name)}">×</button>
             </span>
           `
         )
@@ -3550,38 +3489,23 @@ $('#image-list').onclick=e=>{
   }
 
   imageFiles.splice(
-    Number(
-      btn.dataset.removeImage
-    ),
+    Number(btn.dataset.removeImage),
     1
   );
 
   $('#reference-images').value='';
-
   renderImageList();
 };
 
 $('#reference-images').onchange=e=>{
   imageFiles.push(
-    ...[
-      ...e.target.files
-    ]
-      .filter(
-        f=>
-          /^image\//
-            .test(f.type)
+    ...[...e.target.files]
+      .filter(f=>
+        /^image\//.test(f.type)
       )
-      .slice(
-        0,
-        4-imageFiles.length
-      )
+      .slice(0,4-imageFiles.length)
       .map(
-        file=>({
-          file,
-          name:file.name,
-          type:file.type,
-          size:file.size
-        })
+        file=>({file,name:file.name,type:file.type,size:file.size})
       )
   );
 
@@ -3622,162 +3546,97 @@ function buildQuery(){
 }
 
 function compressImage(file){
-  return new Promise(
-    (resolve,reject)=>{
-      const img=
-        new Image();
+  return new Promise((resolve,reject)=>{
+    const img=new Image();
+    const url=URL.createObjectURL(file);
 
-      const url=
-        URL.createObjectURL(
-          file
+    img.onload=()=>{
+      const max=1280;
+      const scale=Math.min(
+        1,
+        max/Math.max(img.width,img.height)
+      );
+      const canvas=document.createElement('canvas');
+
+      canvas.width=Math.max(
+        1,
+        Math.round(img.width*scale)
+      );
+      canvas.height=Math.max(
+        1,
+        Math.round(img.height*scale)
+      );
+
+      canvas
+        .getContext('2d')
+        .drawImage(
+          img,
+          0,
+          0,
+          canvas.width,
+          canvas.height
         );
 
-      img.onload=()=>{
-        const max=1280;
+      URL.revokeObjectURL(url);
 
-        const scale=
-          Math.min(
-            1,
-            max/
-            Math.max(
-              img.width,
-              img.height
-            )
-          );
-
-        const canvas=
-          document.createElement(
-            'canvas'
-          );
-
-        canvas.width=
-          Math.max(
-            1,
-            Math.round(
-              img.width*
-              scale
-            )
-          );
-
-        canvas.height=
-          Math.max(
-            1,
-            Math.round(
-              img.height*
-              scale
-            )
-          );
-
-        canvas
-          .getContext('2d')
-          .drawImage(
-            img,
-            0,
-            0,
-            canvas.width,
-            canvas.height
-          );
-
-        URL.revokeObjectURL(
-          url
+      const dataUrl=
+        canvas.toDataURL(
+          file.type==='image/png'
+            ? 'image/png'
+            : 'image/jpeg',
+          .82
         );
 
-        const dataUrl=
-          canvas.toDataURL(
-            file.type==='image/png'
-              ? 'image/png'
-              : 'image/jpeg',
-            .82
-          );
+      resolve({
+        name:file.name,
+        mimeType:dataUrl.slice(5,dataUrl.indexOf(';')),
+        data:dataUrl.split(',')[1]
+      });
+    };
 
-        resolve({
-          name:file.name,
+    img.onerror=()=>{
+      URL.revokeObjectURL(url);
+      reject(
+        Error('图片压缩失败。')
+      );
+    };
 
-          mimeType:
-            dataUrl.slice(
-              5,
-              dataUrl.indexOf(';')
-            ),
-
-          data:
-            dataUrl
-              .split(',')[1]
-        });
-      };
-
-      img.onerror=()=>{
-        URL.revokeObjectURL(
-          url
-        );
-
-        reject(
-          Error(
-            '图片压缩失败。'
-          )
-        );
-      };
-
-      img.src=url;
-    }
-  );
+    img.src=url;
+  });
 }
 
 function readImageFile(file){
-  return new Promise(
-    (resolve,reject)=>{
-      const reader=
-        new FileReader();
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
 
-      reader.onload=()=>{
-        const dataUrl=
-          String(
-            reader.result||
-            ''
-          );
+    reader.onload=()=>{
+      const dataUrl=
+        String(reader.result||'');
 
-        if(
-          !dataUrl.includes(',')
-        ){
-          reject(
-            Error(
-              '图片读取失败，请换一张图片。'
-            )
-          );
+      if(!dataUrl.includes(',')){
+        reject(
+          Error('图片读取失败，请换一张图片。')
+        );
+        return;
+      }
 
-          return;
-        }
+      resolve({
+        name:file.name,
+        mimeType:
+          dataUrl
+            .slice(5,dataUrl.indexOf(';'))||
+          file.type||
+          'image/png',
+        data:dataUrl.split(',')[1]
+      });
+    };
 
-        resolve({
-          name:file.name,
+    reader.onerror=()=>reject(
+      Error('图片读取失败，请换一张图片。')
+    );
 
-          mimeType:
-            dataUrl
-              .slice(
-                5,
-                dataUrl.indexOf(';')
-              )||
-            file.type||
-            'image/png',
-
-          data:
-            dataUrl
-              .split(',')[1]
-        });
-      };
-
-      reader.onerror=
-        ()=>
-          reject(
-            Error(
-              '图片读取失败，请换一张图片。'
-            )
-          );
-
-      reader.readAsDataURL(
-        file
-      );
-    }
-  );
+    reader.readAsDataURL(file);
+  });
 }
 
 async function buildImages(){
@@ -3785,13 +3644,9 @@ async function buildImages(){
     imageFiles.map(
       async x=>{
         try{
-          return await compressImage(
-            x.file
-          );
+          return await compressImage(x.file);
         }catch{
-          return readImageFile(
-            x.file
-          );
+          return readImageFile(x.file);
         }
       }
     )
@@ -3813,14 +3668,7 @@ $('#query-form').onsubmit=
     const q=
       buildQuery();
 
-    if(
-      !q&&
-      !imageFiles.length
-    ){
-      $('#error')
-        .textContent=
-          '请输入需求，或上传至少一张参考图片。';
-
+    if(!q){
       return;
     }
 
@@ -3938,8 +3786,7 @@ async function restore(){
   }
 
   query=
-    s.query||
-    '';
+    s.query||'';
 
   $('#query').value=
     query;
@@ -3978,8 +3825,7 @@ async function restore(){
     );
 
     Object.entries(
-      s.checks||
-      {}
+      s.checks||{}
     ).forEach(
       ([k,v])=>
         checksets.set(
@@ -3989,8 +3835,7 @@ async function restore(){
     );
 
     Object.entries(
-      s.controls||
-      {}
+      s.controls||{}
     ).forEach(
       ([k,v])=>
         controls.set(
@@ -4011,30 +3856,21 @@ async function restore(){
 
     if(
       s.showResult&&
-      pages.has(
-        s.active
-      )
+      pages.has(s.active)
     ){
       active=
         s.active;
 
       page=
-        pages.get(
-          active
-        );
+        pages.get(active);
 
       checks=
-        checksets.get(
-          active
-        )||
+        checksets.get(active)||
         new Set();
 
       show();
-
     }else{
-      go(
-        'selection'
-      );
+      go('selection');
     }
 
   }catch{
@@ -4046,9 +3882,7 @@ async function restore(){
       storeKey
     );
 
-    go(
-      'start'
-    );
+    go('start');
   }
 }
 
@@ -4056,25 +3890,19 @@ async function restore(){
    Health
 ========================================================= */
 
-fetch(
-  '/api/health'
-)
+fetch('/api/health')
   .then(
     r=>r.json()
   )
   .then(s=>{
-    $('#connection')
-      .textContent=
-        s.ready
-          ? '● 模型已连接 · 内容统一 · 七种形态'
-          : '请先配置模型密钥';
+    $('#connection').textContent=
+      s.ready
+        ? '● 模型已连接 · 内容统一 · 七种形态'
+        : '请先配置模型密钥';
   })
   .catch(()=>{
-    $('#connection')
-      .textContent=
-        '服务正在唤醒，首次打开可能需要约一分钟';
+    $('#connection').textContent=
+      '服务正在唤醒，首次打开可能需要约一分钟';
   });
-
-renderImageList();
 
 restore();
