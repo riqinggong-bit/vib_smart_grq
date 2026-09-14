@@ -738,44 +738,6 @@ async function verifiedImageUrl(raw){
  return '';
 }
 
-async function productImageFromPage(sourceUrl){
- if(!/^https?:\/\//.test(sourceUrl||'')){
-  return '';
- }
-
- const response=await fetchRemote(
-  sourceUrl,
-  {
-   method:'GET',
-   headers:{
-    Accept:'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8'
-   }
-  }
- );
-
- if(!response||!response.ok){
-  return '';
- }
-
- const type=String(response.headers.get('content-type')||'').toLowerCase();
-
- if(!type.includes('text/html')&&!type.includes('application/xhtml+xml')){
-  try{await response.body?.cancel();}catch{}
-  return '';
- }
-
- const html=await limitedText(response);
-
- for(const candidate of pageImageCandidates(html,response.url||sourceUrl)){
-  const verified=await verifiedImageUrl(candidate);
-  if(verified){
-   return verified;
-  }
- }
-
- return '';
-}
-
 function compactText(value=''){
  return String(value)
   .toLowerCase()
@@ -806,11 +768,339 @@ function entityMatch(text='',entity=''){
   useful.filter(x=>a.includes(x)).length>=Math.min(2,useful.length);
 }
 
+function strictEntityMatch(text='',entity=''){
+ const hay=compactText(text);
+ const exact=compactText(entity);
+
+ if(!hay||!exact){
+  return false;
+ }
+
+ if(exact.length>=6&&hay.includes(exact)){
+  return true;
+ }
+
+ const raw=String(entity).toLowerCase();
+
+ const asciiParts=
+  (
+   raw.match(
+    /[a-z0-9]+(?:-[a-z0-9]+)*/g
+   )||
+   []
+  )
+  .map(compactText)
+  .filter(Boolean);
+
+ const chineseParts=
+  raw.match(
+   /[\u4e00-\u9fff]{2,}/g
+  )||
+  [];
+
+ const strongCodes=
+  asciiParts.filter(x=>
+   x.length>=4&&
+   /[0-9]/.test(x)
+  );
+
+ const asciiJoined=
+  asciiParts.join('');
+
+ let modelOk=true;
+
+ if(strongCodes.length){
+  modelOk=
+   strongCodes.some(
+    x=>hay.includes(x)
+   );
+ }else if(asciiJoined.length>=4){
+  modelOk=
+   hay.includes(asciiJoined)||
+   asciiParts
+    .filter(
+     x=>
+      x.length>=2&&
+      hay.includes(x)
+    )
+    .length>=2;
+ }else if(
+  asciiParts.some(
+   x=>x.length>=2
+  )
+ ){
+  modelOk=
+   asciiParts.some(
+    x=>
+     x.length>=2&&
+     hay.includes(x)
+   );
+ }
+
+ let chineseOk=true;
+
+ if(chineseParts.length){
+  const pairs=[];
+
+  for(const part of chineseParts){
+   const c=
+    compactText(part);
+
+   if(c.length>=2){
+    for(
+     let i=0;
+     i<c.length-1;
+     i++
+    ){
+     pairs.push(
+      c.slice(i,i+2)
+     );
+    }
+   }
+  }
+
+  chineseOk=
+   chineseParts.some(
+    part=>
+     hay.includes(
+      compactText(part)
+     )
+   )||
+   pairs.some(
+    pair=>
+     hay.includes(pair)
+   );
+ }
+
+ return modelOk&&chineseOk;
+}
+
+function pageIdentityText(html=''){
+ const title=
+  stripTags(
+   (
+    html.match(
+     /<title[^>]*>([\s\S]*?)<\/title>/i
+    )||
+    []
+   )[1]||
+   ''
+  );
+
+ const ogTitle=
+  metaContent(
+   html,
+   'og:title'
+  );
+
+ const description=
+  metaContent(
+   html,
+   'description'
+  )||
+  metaContent(
+   html,
+   'og:description'
+  );
+
+ const h1=
+  stripTags(
+   (
+    html.match(
+     /<h1[^>]*>([\s\S]*?)<\/h1>/i
+    )||
+    []
+   )[1]||
+   ''
+  );
+
+ return clean(
+  `${title} ${ogTitle} ${description} ${h1}`,
+  1800
+ );
+}
+
+function plausibleProductImageUrl(raw=''){
+ try{
+  const u=
+   new URL(raw);
+
+  const text=
+   `${u.hostname}${u.pathname}`
+    .toLowerCase();
+
+  return !/(?:favicon|sprite|avatar|qrcode|qr-code|wechat|logo(?:[._/-]|$)|icon(?:[._/-]|$)|header(?:[._/-]|$)|footer(?:[._/-]|$))/i
+   .test(text);
+
+ }catch{
+  return false;
+ }
+}
+
+async function inspectProductPage(
+ sourceUrl,
+ entity
+){
+ if(
+  !/^https?:\/\//
+   .test(
+    sourceUrl||
+    ''
+   )
+ ){
+  return{
+   matched:false,
+   imageUrl:'',
+   sourceUrl,
+   identity:''
+  };
+ }
+
+ const response=
+  await fetchRemote(
+   sourceUrl,
+   {
+    method:'GET',
+    headers:{
+     Accept:
+      'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8'
+    }
+   }
+  );
+
+ if(
+  !response||
+  !response.ok
+ ){
+  return{
+   matched:false,
+   imageUrl:'',
+   sourceUrl,
+   identity:''
+  };
+ }
+
+ const type=
+  String(
+   response.headers.get(
+    'content-type'
+   )||
+   ''
+  )
+  .toLowerCase();
+
+ if(
+  !type.includes(
+   'text/html'
+  )&&
+  !type.includes(
+   'application/xhtml+xml'
+  )
+ ){
+  try{
+   await response
+    .body
+    ?.cancel();
+  }catch{}
+
+  return{
+   matched:false,
+   imageUrl:'',
+   sourceUrl,
+   identity:''
+  };
+ }
+
+ const finalUrl=
+  response.url||
+  sourceUrl;
+
+ const html=
+  await limitedText(
+   response,
+   1500000
+  );
+
+ const identity=
+  pageIdentityText(
+   html
+  );
+
+ const matched=
+  strictEntityMatch(
+   identity,
+   entity
+  );
+
+ if(!matched){
+  return{
+   matched:false,
+   imageUrl:'',
+   sourceUrl:
+    finalUrl,
+   identity
+  };
+ }
+
+ for(
+  const candidate
+  of pageImageCandidates(
+   html,
+   finalUrl
+  )
+ ){
+  if(
+   !plausibleProductImageUrl(
+    candidate
+   )
+  ){
+   continue;
+  }
+
+  const verified=
+   await verifiedImageUrl(
+    candidate
+   );
+
+  if(verified){
+   return{
+    matched:true,
+    imageUrl:
+     verified,
+    sourceUrl:
+     finalUrl,
+    identity
+   };
+  }
+ }
+
+ return{
+  matched:true,
+  imageUrl:'',
+  sourceUrl:
+   finalUrl,
+  identity
+ };
+}
+
 function decodeDuckUrl(raw){
  try{
-  const u=new URL(raw,'https://html.duckduckgo.com');
-  const target=u.searchParams.get('uddg');
-  return target?decodeURIComponent(target):u.href;
+  const u=
+   new URL(
+    raw,
+    'https://html.duckduckgo.com'
+   );
+
+  const target=
+   u.searchParams
+    .get('uddg');
+
+  return target
+   ? decodeURIComponent(
+      target
+     )
+   : u.href;
+
  }catch{
   return '';
  }
@@ -818,73 +1108,226 @@ function decodeDuckUrl(raw){
 
 async function searchHtml(url){
  try{
-  const r=await fetch(url,{
-   method:'GET',
-   redirect:'follow',
-   signal:AbortSignal.timeout(10000),
-   headers:{
-    'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/145 Safari/537.36',
-    'Accept-Language':'zh-CN,zh;q=0.9,en;q=0.8',
-    Accept:'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8'
-   }
-  });
+  const r=
+   await fetch(
+    url,
+    {
+     method:'GET',
+     redirect:'follow',
+     signal:
+      AbortSignal.timeout(
+       10000
+      ),
+     headers:{
+      'User-Agent':
+       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/145 Safari/537.36',
+      'Accept-Language':
+       'zh-CN,zh;q=0.9,en;q=0.8',
+      Accept:
+       'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8'
+     }
+    }
+   );
 
   if(!r.ok){
    return '';
   }
 
-  return limitedText(r,1800000);
+  return limitedText(
+   r,
+   1800000
+  );
+
  }catch{
   return '';
  }
 }
 
-function searchResultScore(result,entity){
- const text=`${result.title||''} ${result.snippet||''} ${result.url||''}`;
+function searchResultScore(
+ result,
+ entity
+){
+ const text=
+  `${
+   result.title||
+   ''
+  } ${
+   result.snippet||
+   ''
+  } ${
+   result.url||
+   ''
+  }`;
+
  let score=0;
 
- if(entityMatch(text,entity))score+=10;
- if(/官方|官网|official/i.test(text))score+=5;
- if(/product|products|item|goods|detail|shop/i.test(result.url||''))score+=2;
- if(/jd\.com|taobao\.com|tmall\.com|smzdm\.com|zhihu\.com|baike\.baidu\.com/i.test(result.url||''))score-=1;
- if(/search|query|category/i.test(result.url||''))score-=2;
+ if(
+  entityMatch(
+   text,
+   entity
+  )
+ ){
+  score+=10;
+ }
+
+ if(
+  /官方|官网|official/i
+   .test(text)
+ ){
+  score+=5;
+ }
+
+ if(
+  /product|products|item|goods|detail|shop/i
+   .test(
+    result.url||
+    ''
+   )
+ ){
+  score+=2;
+ }
+
+ if(
+  /jd\.com|taobao\.com|tmall\.com|smzdm\.com|zhihu\.com|baike\.baidu\.com/i
+   .test(
+    result.url||
+    ''
+   )
+ ){
+  score-=1;
+ }
+
+ if(
+  /search|query|category/i
+   .test(
+    result.url||
+    ''
+   )
+ ){
+  score-=2;
+ }
 
  return score;
 }
 
 async function searchDuckDuckGo(entity){
- const q=encodeURIComponent(`"${entity}" 官方 产品`);
- const html=await searchHtml(`https://html.duckduckgo.com/html/?q=${q}`);
+ const q=
+  encodeURIComponent(
+   `"${entity}" 官方 产品`
+  );
+
+ const html=
+  await searchHtml(
+   `https://html.duckduckgo.com/html/?q=${q}`
+  );
+
  const out=[];
- const re=/<a[^>]+class=["'][^"']*result__a[^"']*["'][^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+
+ const re=
+  /<a[^>]+class=["'][^"']*result__a[^"']*["'][^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+
  let m;
 
- while((m=re.exec(html))&&out.length<10){
-  const url=decodeDuckUrl(decodeHtml(m[1]));
-  const title=stripTags(m[2]);
+ while(
+  (
+   m=
+    re.exec(html)
+  )&&
+  out.length<10
+ ){
+  const url=
+   decodeDuckUrl(
+    decodeHtml(
+     m[1]
+    )
+   );
 
-  if(!/^https?:\/\//.test(url))continue;
-  if(/duckduckgo\.com/i.test(new URL(url).hostname))continue;
+  const title=
+   stripTags(
+    m[2]
+   );
 
-  out.push({url,title,snippet:'',engine:'duckduckgo'});
+  if(
+   !/^https?:\/\//
+    .test(url)
+  ){
+   continue;
+  }
+
+  try{
+   if(
+    /duckduckgo\.com/i
+     .test(
+      new URL(url).hostname
+     )
+   ){
+    continue;
+   }
+  }catch{
+   continue;
+  }
+
+  out.push({
+   url,
+   title,
+   snippet:'',
+   engine:
+    'duckduckgo'
+  });
  }
 
  return out;
 }
 
 async function searchBing(entity){
- const q=encodeURIComponent(`"${entity}" 官方 产品`);
- const html=await searchHtml(`https://www.bing.com/search?q=${q}&count=10&setlang=zh-cn`);
+ const q=
+  encodeURIComponent(
+   `"${entity}" 官方 产品`
+  );
+
+ const html=
+  await searchHtml(
+   `https://www.bing.com/search?q=${q}&count=10&setlang=zh-cn`
+  );
+
  const out=[];
- const re=/<li[^>]+class=["'][^"']*b_algo[^"']*["'][\s\S]*?<h2[^>]*>\s*<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>[\s\S]*?<\/li>/gi;
+
+ const re=
+  /<li[^>]+class=["'][^"']*b_algo[^"']*["'][\s\S]*?<h2[^>]*>\s*<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>[\s\S]*?<\/li>/gi;
+
  let m;
 
- while((m=re.exec(html))&&out.length<10){
-  const url=decodeHtml(m[1]);
-  const title=stripTags(m[2]);
+ while(
+  (
+   m=
+    re.exec(html)
+  )&&
+  out.length<10
+ ){
+  const url=
+   decodeHtml(
+    m[1]
+   );
 
-  if(!/^https?:\/\//.test(url))continue;
-  out.push({url,title,snippet:'',engine:'bing'});
+  const title=
+   stripTags(
+    m[2]
+   );
+
+  if(
+   !/^https?:\/\//
+    .test(url)
+  ){
+   continue;
+  }
+
+  out.push({
+   url,
+   title,
+   snippet:'',
+   engine:
+    'bing'
+  });
  }
 
  return out;
@@ -893,207 +1336,365 @@ async function searchBing(entity){
 async function searchProductSources(entity){
  const all=[];
 
- for(const fn of [searchDuckDuckGo,searchBing]){
+ for(
+  const fn
+  of [
+   searchDuckDuckGo,
+   searchBing
+  ]
+ ){
   try{
-   all.push(...await fn(entity));
+   all.push(
+    ...await fn(entity)
+   );
   }catch{}
 
-  if(all.length>=6){
+  if(
+   all.length>=6
+  ){
    break;
   }
  }
 
  return all
-  .filter((x,i,a)=>a.findIndex(y=>y.url===x.url)===i)
-  .map(x=>({...x,score:searchResultScore(x,entity)}))
-  .filter(x=>x.score>=5)
-  .sort((a,b)=>b.score-a.score)
-  .slice(0,6);
-}
-
-async function searchBingImages(entity){
- const q=encodeURIComponent(`${entity} 官方 产品图`);
- const html=await searchHtml(`https://www.bing.com/images/search?q=${q}&form=HDRSC3&first=1&count=20`);
- const out=[];
- const re=/<a[^>]+class=["'][^"']*iusc[^"']*["'][^>]+m=["']([^"']+)["'][^>]*>/gi;
- let m;
-
- while((m=re.exec(html))&&out.length<8){
-  const encoded=decodeHtml(m[1]);
-  let data;
-
-  try{
-   data=JSON.parse(encoded);
-  }catch{
-   continue;
-  }
-
-  const imageUrl=data.murl||data.turl||'';
-  const sourceUrl=data.purl||'';
-
-  if(!/^https?:\/\//.test(imageUrl))continue;
-
-  out.push({
-   imageUrl,
-   sourceUrl:/^https?:\/\//.test(sourceUrl)?sourceUrl:'',
-   title:clean(data.t||data.desc||entity,120)
-  });
- }
-
- return out;
+  .filter(
+   (
+    x,
+    i,
+    a
+   )=>
+    a.findIndex(
+     y=>
+      y.url===x.url
+    )===i
+  )
+  .map(
+   x=>({
+    ...x,
+    score:
+     searchResultScore(
+      x,
+      entity
+     )
+   })
+  )
+  .filter(
+   x=>x.score>=5
+  )
+  .sort(
+   (a,b)=>
+    b.score-a.score
+  )
+  .slice(
+   0,
+   6
+  );
 }
 
 function proxyImageUrl(raw){
- return `/api/image?url=${encodeURIComponent(raw)}`;
+ return `/api/image?url=${
+  encodeURIComponent(raw)
+ }`;
 }
 
-function mediaEvidenceUrls(item,plan){
- const entity=item.entity||item.title||'';
+function mediaEvidenceUrls(
+ item,
+ plan
+){
+ const entity=
+  item.entity||
+  item.title||
+  '';
+
  const urls=[];
 
- if(/^https?:\/\//.test(item.sourceUrl||'')){
-  urls.push(item.sourceUrl);
+ if(
+  /^https?:\/\//
+   .test(
+    item.sourceUrl||
+    ''
+   )
+ ){
+  urls.push(
+   item.sourceUrl
+  );
  }
 
- for(const fact of plan?.sharedFacts||[]){
+ for(
+  const fact
+  of plan?.sharedFacts||
+  []
+ ){
   const relevant=
-   entityMatch(fact.statement,entity)||
-   (fact.evidence||[]).some(e=>
-    entityMatch(`${e.title||''} ${e.snippet||''}`,entity)
+   entityMatch(
+    fact.statement,
+    entity
+   )||
+   (
+    fact.evidence||
+    []
+   )
+   .some(
+    e=>
+     entityMatch(
+      `${
+       e.title||
+       ''
+      } ${
+       e.snippet||
+       ''
+      }`,
+      entity
+     )
    );
 
   if(!relevant){
    continue;
   }
 
-  for(const evidence of fact.evidence||[]){
-   if(/^https?:\/\//.test(evidence.url||'')){
-    urls.push(evidence.url);
+  for(
+   const evidence
+   of fact.evidence||
+   []
+  ){
+   if(
+    /^https?:\/\//
+     .test(
+      evidence.url||
+      ''
+     )
+   ){
+    urls.push(
+     evidence.url
+    );
    }
   }
  }
 
- return [...new Set(urls)].slice(0,5);
+ return [
+  ...new Set(urls)
+ ].slice(
+  0,
+  5
+ );
 }
 
-async function resolveProductMediaItem(item,plan){
- const entity=clean(item.entity||item.title||'',80);
+async function resolveProductMediaItem(
+ item,
+ plan
+){
+ const entity=
+  clean(
+   item.entity||
+   item.title||
+   '',
+   80
+  );
 
  if(!entity){
   return null;
  }
 
- console.log(`[product-image] resolving: ${entity}`);
+ console.log(
+  `[product-image] resolving: ${entity}`
+ );
 
- const direct=await verifiedImageUrl(item.url);
+ const sourceUrls=
+  mediaEvidenceUrls(
+   item,
+   plan
+  );
 
- if(direct){
-  console.log(`[product-image] direct image ok: ${entity}`);
-  return{
-   ...item,
-   entity,
-   title:item.title||entity,
-   url:proxyImageUrl(direct),
-   source:item.source||'网页图片',
-   sourceUrl:item.sourceUrl||direct
-  };
- }
+ for(
+  const sourceUrl
+  of sourceUrls
+ ){
+  const inspected=
+   await inspectProductPage(
+    sourceUrl,
+    entity
+   );
 
- const sourceUrls=mediaEvidenceUrls(item,plan);
+  if(
+   !inspected.matched
+  ){
+   console.warn(
+    `[product-image] reject unrelated evidence page: ${entity} <- ${sourceUrl}`
+   );
 
- for(const sourceUrl of sourceUrls){
-  const imageUrl=await productImageFromPage(sourceUrl);
-
-  if(!imageUrl){
    continue;
   }
 
-  let source=item.source;
+  if(
+   !inspected.imageUrl
+  ){
+   console.warn(
+    `[product-image] matched evidence page but no usable product image: ${entity} <- ${sourceUrl}`
+   );
+
+   continue;
+  }
+
+  let source=
+   item.source;
 
   if(!source){
-   try{source=new URL(sourceUrl).hostname;}catch{source='产品来源页';}
-  }
-
-  console.log(`[product-image] evidence page image ok: ${entity} <- ${sourceUrl}`);
-
-  return{
-   ...item,
-   entity,
-   title:item.title||entity,
-   url:proxyImageUrl(imageUrl),
-   source,
-   sourceUrl
-  };
- }
-
- const searched=await searchProductSources(entity);
-
- for(const result of searched){
-  const imageUrl=await productImageFromPage(result.url);
-
-  if(!imageUrl){
-   continue;
-  }
-
-  let source=result.title||'';
-  if(!source){
-   try{source=new URL(result.url).hostname;}catch{source='网页来源';}
-  }
-
-  console.log(`[product-image] search page image ok: ${entity} <- ${result.url}`);
-
-  return{
-   ...item,
-   entity,
-   title:item.title||entity,
-   url:proxyImageUrl(imageUrl),
-   source:clean(source,80),
-   sourceUrl:result.url
-  };
- }
-
- const imageResults=await searchBingImages(entity);
-
- for(const result of imageResults){
-  const imageUrl=await verifiedImageUrl(result.imageUrl);
-
-  if(!imageUrl){
-   continue;
-  }
-
-  let source='图片搜索结果';
-
-  if(result.sourceUrl){
    try{
-    source=new URL(result.sourceUrl).hostname;
-   }catch{}
+    source=
+     new URL(
+      inspected.sourceUrl||
+      sourceUrl
+     ).hostname;
+
+   }catch{
+    source=
+     '产品来源页';
+   }
   }
 
-  console.log(`[product-image] image search fallback ok: ${entity}`);
+  console.log(
+   `[product-image] verified evidence product image: ${entity} <- ${inspected.sourceUrl||sourceUrl}`
+  );
 
   return{
    ...item,
+
    entity,
-   title:item.title||entity,
-   url:proxyImageUrl(imageUrl),
-   source,
-   sourceUrl:result.sourceUrl||imageUrl
+
+   title:
+    item.title||
+    entity,
+
+   url:
+    proxyImageUrl(
+     inspected.imageUrl
+    ),
+
+   source:
+    clean(
+     source,
+     80
+    ),
+
+   sourceUrl:
+    inspected.sourceUrl||
+    sourceUrl
   };
  }
 
- console.warn(`[product-image] no verified image found: ${entity}`);
+ const searched=
+  await searchProductSources(
+   entity
+  );
+
+ for(
+  const result
+  of searched
+ ){
+  const inspected=
+   await inspectProductPage(
+    result.url,
+    entity
+   );
+
+  if(
+   !inspected.matched
+  ){
+   console.warn(
+    `[product-image] reject unrelated search page: ${entity} <- ${result.url}`
+   );
+
+   continue;
+  }
+
+  if(
+   !inspected.imageUrl
+  ){
+   console.warn(
+    `[product-image] matched search page but no usable product image: ${entity} <- ${result.url}`
+   );
+
+   continue;
+  }
+
+  let source=
+   result.title||
+   '';
+
+  if(!source){
+   try{
+    source=
+     new URL(
+      inspected.sourceUrl||
+      result.url
+     ).hostname;
+
+   }catch{
+    source=
+     '网页来源';
+   }
+  }
+
+  console.log(
+   `[product-image] verified search product image: ${entity} <- ${inspected.sourceUrl||result.url}`
+  );
+
+  return{
+   ...item,
+
+   entity,
+
+   title:
+    item.title||
+    entity,
+
+   url:
+    proxyImageUrl(
+     inspected.imageUrl
+    ),
+
+   source:
+    clean(
+     source,
+     80
+    ),
+
+   sourceUrl:
+    inspected.sourceUrl||
+    result.url
+  };
+ }
+
+ console.warn(
+  `[product-image] no semantically verified image found: ${entity}`
+ );
 
  return null;
 }
 
 function productSeedsFromLinks(section){
- const seen=new Set();
+ const seen=
+  new Set();
+
  const out=[];
 
- for(const link of section.links||[]){
-  const entity=clean(link.label||link.query||'',80);
+ for(
+  const link
+  of section.links||
+  []
+ ){
+  const entity=
+   clean(
+    link.label||
+    link.query||
+    '',
+    80
+   );
 
-  if(!entity||seen.has(entity)){
+  if(
+   !entity||
+   seen.has(entity)
+  ){
    continue;
   }
 
@@ -1101,66 +1702,121 @@ function productSeedsFromLinks(section){
 
   out.push({
    url:'',
-   title:entity,
+   title:
+    entity,
    caption:'',
    source:'',
    sourceUrl:'',
    entity,
-   factIds:Array.isArray(section.factIds)
-    ? section.factIds
-    : []
+   factIds:
+    Array.isArray(
+     section.factIds
+    )
+     ? section.factIds
+     : []
   });
  }
 
- return out.slice(0,4);
+ return out.slice(
+  0,
+  4
+ );
 }
 
-function isGenericCandidateLabel(value=''){
- const text=clean(value,80).toLowerCase();
+function isGenericCandidateLabel(
+ value=''
+){
+ const text=
+  clean(
+   value,
+   80
+  )
+  .toLowerCase();
 
- if(!text||text.length<2||text.length>50){
+ if(
+  !text||
+  text.length<2||
+  text.length>50
+ ){
   return true;
  }
 
- if(/^[\d\s.%¥￥$+\-/×x~～]+$/i.test(text)){
+ if(
+  /^[\d\s.%¥￥$+\-/×x~～]+$/i
+   .test(text)
+ ){
   return true;
  }
 
- return /^(对比维度|对比项|参数|项目|指标|维度|产品|商品|品牌|型号|车型|候选|名称|方案|选项|定位|核心优势|主要短板|适用人群|风险与待核实参数|价格|售价|预算|尺寸|重量|续航|容量|噪音|功率|匹配度|推荐度)$/i.test(text);
+ return /^(对比维度|对比项|参数|项目|指标|维度|产品|商品|品牌|型号|车型|候选|名称|方案|选项|定位|核心优势|主要短板|适用人群|风险与待核实参数|价格|售价|预算|尺寸|重量|续航|容量|噪音|功率|匹配度|推荐度)$/i
+  .test(text);
 }
 
-function candidateLabelsFromSection(section){
+function candidateLabelsFromSection(
+ section
+){
  if(
   !section||
-  !['comparison','table'].includes(section.type)||
-  !Array.isArray(section.rows)||
+  ![
+   'comparison',
+   'table'
+  ].includes(
+   section.type
+  )||
+  !Array.isArray(
+   section.rows
+  )||
   section.rows.length<2
  ){
   return [];
  }
 
- const rows=section.rows;
- const header=Array.isArray(rows[0])
-  ? rows[0]
-  : [];
+ const rows=
+  section.rows;
 
- if(header.length<2){
+ const header=
+  Array.isArray(
+   rows[0]
+  )
+   ? rows[0]
+   : [];
+
+ if(
+  header.length<2
+ ){
   return [];
  }
 
- const first=clean(header[0]||'',60);
+ const first=
+  clean(
+   header[0]||
+   '',
+   60
+  );
 
  const columnOriented=
   /对比|维度|项目|指标|参数|选项/i
    .test(first);
 
- if(columnOriented){
-  const labels=header
-   .slice(1)
-   .map(x=>clean(x,80))
-   .filter(x=>
-    !isGenericCandidateLabel(x)
-   );
+ if(
+  columnOriented
+ ){
+  const labels=
+   header
+    .slice(1)
+    .map(
+     x=>
+      clean(
+       x,
+       80
+      )
+    )
+    .filter(
+     x=>
+      !isGenericCandidateLabel(
+       x
+      )
+    );
 
   if(
    labels.length>=2&&
@@ -1174,19 +1830,33 @@ function candidateLabelsFromSection(section){
   /产品|商品|品牌|型号|车型|候选|名称|方案|选项/i
    .test(first)
  ){
-  const labels=rows
-   .slice(1)
-   .map(r=>
-    Array.isArray(r)
-     ? clean(r[0]||'',80)
-     : ''
-   )
-   .filter(x=>
-    !isGenericCandidateLabel(x)
-   )
-   .slice(0,4);
+  const labels=
+   rows
+    .slice(1)
+    .map(
+     r=>
+      Array.isArray(r)
+       ? clean(
+          r[0]||
+          '',
+          80
+         )
+       : ''
+    )
+    .filter(
+     x=>
+      !isGenericCandidateLabel(
+       x
+      )
+    )
+    .slice(
+     0,
+     4
+    );
 
-  if(labels.length>=2){
+  if(
+   labels.length>=2
+  ){
    return labels;
   }
  }
@@ -1194,106 +1864,175 @@ function candidateLabelsFromSection(section){
  return [];
 }
 
-function looksLikeProductTask(page,query=''){
+function looksLikeProductTask(
+ page,
+ query=''
+){
  const text=[
   query,
   page?.title,
   page?.subtitle,
   page?.summary,
-  ...(page?.sections||[])
-   .flatMap(s=>[
+  ...(
+   page?.sections||
+   []
+  ).flatMap(
+   s=>[
     s.heading,
     s.intro
-   ])
+   ]
+  )
  ]
-  .filter(Boolean)
-  .join(' ');
+ .filter(Boolean)
+ .join(' ');
 
  return /商品|产品|品牌|型号|车型|车载|轿车|汽车|新能源|手机|电脑|耳机|相机|冰箱|空调|净化器|电视|家电|选购|购买|推荐|价格|预算|配置|续航|电池|容量|款/i
   .test(text);
 }
 
-function linksForCandidates(page,candidates){
+function linksForCandidates(
+ page,
+ candidates
+){
  const allLinks=
-  (page?.sections||[])
-   .flatMap(
-    s=>
-     Array.isArray(s.links)
-      ? s.links
-      : []
-   );
+  (
+   page?.sections||
+   []
+  )
+  .flatMap(
+   s=>
+    Array.isArray(
+     s.links
+    )
+     ? s.links
+     : []
+  );
 
  const out=[];
- const seen=new Set();
+ const seen=
+  new Set();
 
- for(const candidate of candidates){
+ for(
+  const candidate
+  of candidates
+ ){
   const matched=
-   allLinks.filter(link=>
-    entityMatch(
-     `${link.label||''} ${link.query||''}`,
-     candidate
-    )
+   allLinks.filter(
+    link=>
+     entityMatch(
+      `${
+       link.label||
+       ''
+      } ${
+       link.query||
+       ''
+      }`,
+      candidate
+     )
    );
 
-  for(const link of matched){
+  for(
+   const link
+   of matched
+  ){
    const key=
-    `${link.channel}::${link.query}`;
+    `${
+     link.channel
+    }::${
+     link.query
+    }`;
 
-   if(seen.has(key)){
+   if(
+    seen.has(key)
+   ){
     continue;
    }
 
    seen.add(key);
 
    out.push({
-    label:clean(
-     link.label||candidate,
-     80
-    ),
-    query:clean(
-     link.query||candidate,
-     120
-    ),
+    label:
+     clean(
+      link.label||
+      candidate,
+      80
+     ),
+
+    query:
+     clean(
+      link.query||
+      candidate,
+      120
+     ),
+
     channel:
-     ['official','jd','taobao']
-      .includes(link.channel)
-       ? link.channel
-       : 'official'
+     [
+      'official',
+      'jd',
+      'taobao'
+     ].includes(
+      link.channel
+     )
+      ? link.channel
+      : 'official'
    });
   }
 
   const hasCandidate=
-   out.some(link=>
-    entityMatch(
-     `${link.label} ${link.query}`,
-     candidate
-    )
+   out.some(
+    link=>
+     entityMatch(
+      `${
+       link.label
+      } ${
+       link.query
+      }`,
+      candidate
+     )
    );
 
-  if(!hasCandidate){
+  if(
+   !hasCandidate
+  ){
    for(
     const channel
-    of ['jd','taobao']
+    of [
+     'jd',
+     'taobao'
+    ]
    ){
     const key=
-     `${channel}::${candidate}`;
+     `${
+      channel
+     }::${
+      candidate
+     }`;
 
-    if(seen.has(key)){
+    if(
+     seen.has(key)
+    ){
      continue;
     }
 
     seen.add(key);
 
     out.push({
-     label:candidate,
-     query:candidate,
+     label:
+      candidate,
+
+     query:
+      candidate,
+
      channel
     });
    }
   }
  }
 
- return out.slice(0,9);
+ return out.slice(
+  0,
+  9
+ );
 }
 
 function ensureProductImageSection(
@@ -1303,7 +2042,9 @@ function ensureProductImageSection(
 ){
  if(
   !page||
-  !Array.isArray(page.sections)||
+  !Array.isArray(
+   page.sections
+  )||
   !looksLikeProductTask(
    page,
    query
@@ -1317,7 +2058,8 @@ function ensureProductImageSection(
 
  for(
   let i=0;
-  i<page.sections.length;
+  i<
+  page.sections.length;
   i++
  ){
   const found=
@@ -1325,40 +2067,66 @@ function ensureProductImageSection(
     page.sections[i]
    );
 
-  if(found.length>candidates.length){
-   candidates=found;
+  if(
+   found.length>
+   candidates.length
+  ){
+   candidates=
+    found;
+
    sourceIndex=i;
   }
  }
 
- if(candidates.length<2){
+ if(
+  candidates.length<2
+ ){
   return page;
  }
 
  const existing=
   page.sections.find(
-   s=>s.type==='product_image'
+   s=>
+    s.type===
+    'product_image'
   );
 
  const sourceSection=
-  page.sections[sourceIndex]||{};
+  page.sections[
+   sourceIndex
+  ]||{};
 
  const sharedFactIds=
-  Array.isArray(sourceSection.factIds)
-   ? sourceSection.factIds.slice(0,12)
+  Array.isArray(
+   sourceSection.factIds
+  )
+   ? sourceSection.factIds
+      .slice(
+       0,
+       12
+      )
    : [];
 
  const seeds=
   candidates.map(
    candidate=>({
     url:'',
-    title:candidate,
+
+    title:
+     candidate,
+
     caption:
      '候选产品图片仅用于快速识别与视觉参考，具体参数与价格以页面中的事实证据为准。',
+
     source:'',
+
     sourceUrl:'',
-    entity:candidate,
-    factIds:sharedFactIds
+
+    entity:
+     candidate,
+
+    factIds:
+     sharedFactIds
    })
   );
 
@@ -1370,20 +2138,28 @@ function ensureProductImageSection(
 
  if(existing){
   if(
-   !Array.isArray(existing.media)||
+   !Array.isArray(
+    existing.media
+   )||
    !existing.media.length
   ){
-   existing.media=seeds;
+   existing.media=
+    seeds;
   }
 
   if(
-   !Array.isArray(existing.links)||
+   !Array.isArray(
+    existing.links
+   )||
    !existing.links.length
   ){
-   existing.links=links;
+   existing.links=
+    links;
   }
 
-  if(!existing.heading){
+  if(
+   !existing.heading
+  ){
    existing.heading=
     '候选产品图文一览';
   }
@@ -1392,16 +2168,28 @@ function ensureProductImageSection(
  }
 
  const section={
-  type:'product_image',
-  heading:'候选产品图文一览',
+  type:
+   'product_image',
+
+  heading:
+   '候选产品图文一览',
+
   intro:
    '先通过产品图片快速建立识别，再结合下方参数、事实证据与风险项进行比较。图片仅用于视觉展示，不作为参数真实性证据。',
+
   items:[],
+
   rows:[],
+
   resultLabel:'',
-  factIds:sharedFactIds,
+
+  factIds:
+   sharedFactIds,
+
   links,
-  media:seeds
+
+  media:
+   seeds
  };
 
  let insertAt=
@@ -1410,11 +2198,14 @@ function ensureProductImageSection(
    sourceIndex
   );
 
- if(page.sections.length>=8){
+ if(
+  page.sections.length>=8
+ ){
   let removeAt=-1;
 
   for(
-   let i=page.sections.length-1;
+   let i=
+    page.sections.length-1;
    i>=0;
    i--
   ){
@@ -1435,20 +2226,29 @@ function ensureProductImageSection(
    }
   }
 
-  if(removeAt<0){
+  if(
+   removeAt<0
+  ){
    removeAt=
-    page.sections.findIndex(
-     (_,i)=>i!==sourceIndex
-    );
+    page.sections
+     .findIndex(
+      (_,i)=>
+       i!==sourceIndex
+     );
   }
 
-  if(removeAt>=0){
+  if(
+   removeAt>=0
+  ){
    page.sections.splice(
     removeAt,
     1
    );
 
-   if(removeAt<insertAt){
+   if(
+    removeAt<
+    insertAt
+   ){
     insertAt--;
    }
   }
@@ -1475,13 +2275,21 @@ async function enrichProductMedia(
 ){
  if(
   !page||
-  !Array.isArray(page.sections)
+  !Array.isArray(
+   page.sections
+  )
  ){
   return page;
  }
 
- for(const section of page.sections){
-  if(section.type!=='product_image'){
+ for(
+  const section
+  of page.sections
+ ){
+  if(
+   section.type!==
+   'product_image'
+  ){
    continue;
   }
 
@@ -1495,7 +2303,10 @@ async function enrichProductMedia(
   const resolved=
    await Promise.all(
     seeds
-     .slice(0,4)
+     .slice(
+      0,
+      4
+     )
      .map(
       item=>
        resolveProductMediaItem(
@@ -1508,7 +2319,10 @@ async function enrichProductMedia(
   section.media=
    resolved
     .filter(Boolean)
-    .slice(0,4);
+    .slice(
+     0,
+     4
+    );
  }
 
  return page;
@@ -1583,47 +2397,97 @@ function parsePlan(o){
  p.constraints=
   p.constraints
    .slice(0,12)
-   .map(x=>clean(x,100));
+   .map(
+    x=>
+     clean(
+      x,
+      100
+     )
+   );
 
  p.sharedFacts=
   p.sharedFacts
    .slice(0,20)
    .map(x=>{
     const ev=
-     normalizeEvidence(x.evidence);
+     normalizeEvidence(
+      x.evidence
+     );
 
     const fact={
      ...x,
-     id:clean(x.id,30),
-     statement:clean(
-      x.statement,
-      160
-     ),
-     source:clean(
-      x.source,
-      100
-     )
+
+     id:
+      clean(
+       x.id,
+       30
+      ),
+
+     statement:
+      clean(
+       x.statement,
+       160
+      ),
+
+     source:
+      clean(
+       x.source,
+       100
+      )
     };
 
-    if(ev.length){
-     fact.evidence=ev;
+    if(
+     ev.length
+    ){
+     fact.evidence=
+      ev;
     }
 
     return fact;
    });
 
  p.variants=
-  p.variants.map((x,i)=>({
-   ...x,
-   layout:layouts[i],
-   title:clean(x.title,30),
-   audience:clean(x.audience,70),
-   focus:clean(x.focus,100),
-   outcome:clean(x.outcome,80),
-   outline:x.outline.map(
-    y=>clean(y,70)
-   )
-  }));
+  p.variants.map(
+   (x,i)=>({
+    ...x,
+
+    layout:
+     layouts[i],
+
+    title:
+     clean(
+      x.title,
+      30
+     ),
+
+    audience:
+     clean(
+      x.audience,
+      70
+     ),
+
+    focus:
+     clean(
+      x.focus,
+      100
+     ),
+
+    outcome:
+     clean(
+      x.outcome,
+      80
+     ),
+
+    outline:
+     x.outline.map(
+      y=>
+       clean(
+        y,
+        70
+       )
+     )
+   })
+  );
 
  return p;
 }
@@ -1638,57 +2502,100 @@ function parsePage(o){
    'subtitle',
    'summary'
   ].every(
-   k=>typeof p[k]==='string'
+   k=>
+    typeof p[k]===
+    'string'
   )||
-  !Array.isArray(p.sections)||
+  !Array.isArray(
+   p.sections
+  )||
   p.sections.length<3||
   p.sections.length>8||
-  !p.sections.every(s=>
-   s&&
-   types.includes(s.type)&&
-   typeof s.heading==='string'&&
-   typeof s.intro==='string'&&
-   Array.isArray(s.items)&&
-   s.items.every(
-    x=>typeof x==='string'
-   )&&
-   Array.isArray(s.rows)&&
-   s.rows.every(r=>
-    Array.isArray(r)&&
-    r.every(
-     x=>typeof x==='string'
+  !p.sections.every(
+   s=>
+    s&&
+    types.includes(
+     s.type
+    )&&
+    typeof s.heading===
+    'string'&&
+    typeof s.intro===
+    'string'&&
+    Array.isArray(
+     s.items
+    )&&
+    s.items.every(
+     x=>
+      typeof x===
+      'string'
+    )&&
+    Array.isArray(
+     s.rows
+    )&&
+    s.rows.every(
+     r=>
+      Array.isArray(r)&&
+      r.every(
+       x=>
+        typeof x===
+        'string'
+      )
+    )&&
+    typeof s.resultLabel===
+    'string'&&
+    Array.isArray(
+     s.factIds
+    )&&
+    s.factIds.every(
+     x=>
+      typeof x===
+      'string'
+    )&&
+    Array.isArray(
+     s.links
+    )&&
+    s.links.every(
+     x=>
+      x&&
+      typeof x.label===
+      'string'&&
+      typeof x.query===
+      'string'&&
+      [
+       'official',
+       'jd',
+       'taobao'
+      ].includes(
+       x.channel
+      )
+    )&&
+    Array.isArray(
+     s.media
+    )&&
+    s.media.every(
+     x=>
+      x&&
+      typeof x.url===
+      'string'&&
+      typeof x.title===
+      'string'&&
+      typeof x.caption===
+      'string'&&
+      typeof x.source===
+      'string'&&
+      typeof x.sourceUrl===
+      'string'&&
+      typeof x.entity===
+      'string'&&
+      Array.isArray(
+       x.factIds
+      )&&
+      x.factIds.every(
+       y=>
+        typeof y===
+        'string'
+      )
     )
-   )&&
-   typeof s.resultLabel==='string'&&
-   Array.isArray(s.factIds)&&
-   s.factIds.every(
-    x=>typeof x==='string'
-   )&&
-   Array.isArray(s.links)&&
-   s.links.every(x=>
-    x&&
-    typeof x.label==='string'&&
-    typeof x.query==='string'&&
-    [
-     'official',
-     'jd',
-     'taobao'
-    ].includes(x.channel)
-   )&&
-   Array.isArray(s.media)&&
-   s.media.every(x=>
-    x&&
-    typeof x.url==='string'&&
-    typeof x.title==='string'&&
-    typeof x.caption==='string'&&
-    typeof x.source==='string'&&
-    typeof x.sourceUrl==='string'&&
-    typeof x.entity==='string'&&
-    Array.isArray(x.factIds)&&
-    x.factIds.every(y=>
-     typeof y==='string'
-    )
-   )
   )
  ){
   throw Error(
@@ -1696,54 +2603,108 @@ function parsePage(o){
   );
  }
 
- for(const s of p.sections){
+ for(
+  const s
+  of p.sections
+ ){
   s.media=
    normalizeMedia(
     s.media,
-    s.type==='product_image'
+    s.type===
+    'product_image'
    );
 
   s.formula=
-   ['sum','product']
-    .includes(s.items[0])
-     ? s.items[0]
-     : 'none';
+   [
+    'sum',
+    'product'
+   ].includes(
+    s.items[0]
+   )
+    ? s.items[0]
+    : 'none';
 
   s.fields=
-   s.type==='calculator'
+   s.type===
+   'calculator'
     ? s.rows
        .slice(1)
-       .map(r=>({
-        label:r[0]||'项目',
-        value:Number(r[1])||0,
-        min:Number(r[2])||0,
-        max:Number(r[3])||100,
-        step:Number(r[4])||1,
-        unit:r[5]||''
-       }))
+       .map(
+        r=>({
+         label:
+          r[0]||
+          '项目',
+
+         value:
+          Number(
+           r[1]
+          )||
+          0,
+
+         min:
+          Number(
+           r[2]
+          )||
+          0,
+
+         max:
+          Number(
+           r[3]
+          )||
+          100,
+
+         step:
+          Number(
+           r[4]
+          )||
+          1,
+
+         unit:
+          r[5]||
+          ''
+        })
+       )
     : [];
  }
 
  return p;
 }
 
-function modelError(status,detail=''){
+function modelError(
+ status,
+ detail=''
+){
  const m={
-  400:'模型或请求配置不受支持。',
-  401:'API Key 无效。',
-  403:'当前项目没有访问权限。',
-  404:'模型不存在或无法访问。',
-  429:'API 配额不足或请求过于频繁。',
-  503:'模型服务繁忙，请稍后重试。'
+  400:
+   '模型或请求配置不受支持。',
+
+  401:
+   'API Key 无效。',
+
+  403:
+   '当前项目没有访问权限。',
+
+  404:
+   '模型不存在或无法访问。',
+
+  429:
+   'API 配额不足或请求过于频繁。',
+
+  503:
+   '模型服务繁忙，请稍后重试。'
  };
 
- const error=Error(
-  m[status]||
-  `模型服务暂时不可用（${status}）。`
- );
+ const error=
+  Error(
+   m[status]||
+   `模型服务暂时不可用（${status}）。`
+  );
 
- error.detail=detail;
- error.apiStatus=status;
+ error.detail=
+  detail;
+
+ error.apiStatus=
+  status;
 
  console.error(
   'Model API error:',
@@ -1761,18 +2722,34 @@ async function postModel(
 ){
  let r,o,lastDetail='';
 
- for(let attempt=0;attempt<3;attempt++){
-  r=await fetch(endpoint,{
-   method:'POST',
-   signal:AbortSignal.timeout(
-    90000
-   ),
-   headers,
-   body:JSON.stringify(payload)
-  });
+ for(
+  let attempt=0;
+  attempt<3;
+  attempt++
+ ){
+  r=
+   await fetch(
+    endpoint,
+    {
+     method:'POST',
+
+     signal:
+      AbortSignal.timeout(
+       90000
+      ),
+
+     headers,
+
+     body:
+      JSON.stringify(
+       payload
+      )
+    }
+   );
 
   if(r.ok){
-   o=await r.json();
+   o=
+    await r.json();
 
    return{
     r,
@@ -1782,12 +2759,14 @@ async function postModel(
   }
 
   try{
-   const data=await r.json();
+   const data=
+    await r.json();
 
    lastDetail=
     data.error?.message||
     data.message||
     '';
+
   }catch{}
 
   if(
@@ -1797,18 +2776,21 @@ async function postModel(
     502,
     503,
     504
-   ].includes(r.status)||
+   ].includes(
+    r.status
+   )||
    attempt===2
   ){
    break;
   }
 
-  await new Promise(resolve=>
-   setTimeout(
-    resolve,
-    800*2**attempt+
-    Math.random()*300
-   )
+  await new Promise(
+   resolve=>
+    setTimeout(
+     resolve,
+     800*2**attempt+
+     Math.random()*300
+    )
   );
  }
 
@@ -1821,13 +2803,25 @@ async function postModel(
 
 function wrapText(text){
  return{
-  output:[{
-   type:'message',
-   content:[{
-    type:'output_text',
-    text:String(text||'')
-   }]
-  }]
+  output:[
+   {
+    type:
+     'message',
+
+    content:[
+     {
+      type:
+       'output_text',
+
+      text:
+       String(
+        text||
+        ''
+       )
+     }
+    ]
+   }
+  ]
  };
 }
 
@@ -1842,7 +2836,9 @@ async function requestCloseAI(
   `${closeAIBase}/chat/completions`;
 
  const schemaText=
-  JSON.stringify(schema);
+  JSON.stringify(
+   schema
+  );
 
  const systemPrompt=
   instructions+
@@ -1854,44 +2850,72 @@ async function requestCloseAI(
   schemaText;
 
  const headers={
-  'Content-Type':'application/json',
-  Authorization:`Bearer ${apiKey()}`
+  'Content-Type':
+   'application/json',
+
+  Authorization:
+   `Bearer ${apiKey()}`
  };
 
  const makePayload=
   messages=>({
    model,
    messages,
+
    response_format:{
-    type:'json_object'
+    type:
+     'json_object'
    },
-   temperature:0.1
+
+   temperature:
+    0.1
   });
 
  let payload=
-  makePayload([
-   {
-    role:'system',
-    content:systemPrompt
-   },
-   {
-    role:'user',
-    content:imageParts(images).length
-     ? [
-        {
-         type:'text',
-         text:input
-        },
-        ...imageParts(images).map(img=>({
-         type:'image_url',
-         image_url:{
-          url:`data:${img.mimeType};base64,${img.data}`
-         }
-        }))
-       ]
-     : input
-   }
-  ]);
+  makePayload(
+   [
+    {
+     role:
+      'system',
+
+     content:
+      systemPrompt
+    },
+    {
+     role:
+      'user',
+
+     content:
+      imageParts(
+       images
+      ).length
+       ? [
+          {
+           type:
+            'text',
+
+           text:
+            input
+          },
+
+          ...imageParts(
+           images
+          ).map(
+           img=>({
+            type:
+             'image_url',
+
+            image_url:{
+             url:
+              `data:${img.mimeType};base64,${img.data}`
+            }
+           })
+          )
+         ]
+       : input
+    }
+   ]
+  );
 
  let result=
   await postModel(
@@ -1902,13 +2926,15 @@ async function requestCloseAI(
 
  if(
   !result.r?.ok&&
-  result.r?.status===400
+  result.r?.status===
+  400
  ){
   const fallback={
    ...payload
   };
 
-  delete fallback.response_format;
+  delete fallback
+   .response_format;
 
   result=
    await postModel(
@@ -1918,9 +2944,12 @@ async function requestCloseAI(
    );
  }
 
- if(!result.r?.ok){
+ if(
+  !result.r?.ok
+ ){
   throw modelError(
-   result.r?.status||502,
+   result.r?.status||
+   502,
    result.lastDetail
   );
  }
@@ -1940,8 +2969,11 @@ async function requestCloseAI(
 
  try{
   return parser(
-   wrapText(content)
+   wrapText(
+    content
+   )
   );
+
  }catch(firstError){
   console.warn(
    '模型 JSON 第一次校验失败，尝试自动修复：',
@@ -1950,25 +2982,31 @@ async function requestCloseAI(
  }
 
  const repairPayload=
-  makePayload([
-   {
-    role:'system',
-    content:
-     '你是 JSON 修复器。'+
-     '\n必须把用户提供的 JSON 修复成严格符合下面 JSON Schema 的结果。'+
-     '\n不得增加 Schema 外字段，不得缺少必填字段。'+
-     '\n如果 Schema 指定数组数量，必须严格满足。'+
-     '\n只输出修复后的合法 JSON，不要解释，不要 Markdown，不要代码块。'+
-     '\nJSON Schema：\n'+
-     schemaText
-   },
-   {
-    role:'user',
-    content:
-     '请修复下面的 JSON，使其严格符合 Schema：\n\n'+
-     content
-   }
-  ]);
+  makePayload(
+   [
+    {
+     role:
+      'system',
+
+     content:
+      '你是 JSON 修复器。'+
+      '\n必须把用户提供的 JSON 修复成严格符合下面 JSON Schema 的结果。'+
+      '\n不得增加 Schema 外字段，不得缺少必填字段。'+
+      '\n如果 Schema 指定数组数量，必须严格满足。'+
+      '\n只输出修复后的合法 JSON，不要解释，不要 Markdown，不要代码块。'+
+      '\nJSON Schema：\n'+
+      schemaText
+    },
+    {
+     role:
+      'user',
+
+     content:
+      '请修复下面的 JSON，使其严格符合 Schema：\n\n'+
+      content
+    }
+   ]
+  );
 
  let repaired=
   await postModel(
@@ -1979,13 +3017,15 @@ async function requestCloseAI(
 
  if(
   !repaired.r?.ok&&
-  repaired.r?.status===400
+  repaired.r?.status===
+  400
  ){
   const fallback={
    ...repairPayload
   };
 
-  delete fallback.response_format;
+  delete fallback
+   .response_format;
 
   repaired=
    await postModel(
@@ -1995,9 +3035,12 @@ async function requestCloseAI(
    );
  }
 
- if(!repaired.r?.ok){
+ if(
+  !repaired.r?.ok
+ ){
   throw modelError(
-   repaired.r?.status||502,
+   repaired.r?.status||
+   502,
    repaired.lastDetail
   );
  }
@@ -2016,7 +3059,9 @@ async function requestCloseAI(
  }
 
  return parser(
-  wrapText(content)
+  wrapText(
+   content
+  )
  );
 }
 
@@ -2033,42 +3078,70 @@ async function requestGeminiOfficial(
 
  const base={
   systemInstruction:{
-   parts:[{
-    text:instructions
-   }]
-  },
-  contents:[{
-   role:'user',
    parts:[
     {
-     text:input
-    },
-    ...imageParts(images).map(img=>({
-     inlineData:{
-      mimeType:img.mimeType,
-      data:img.data
-     }
-    }))
+     text:
+      instructions
+    }
    ]
-  }],
+  },
+
+  contents:[
+   {
+    role:
+     'user',
+
+    parts:[
+     {
+      text:
+       input
+     },
+
+     ...imageParts(
+      images
+     ).map(
+      img=>({
+       inlineData:{
+        mimeType:
+         img.mimeType,
+
+        data:
+         img.data
+       }
+      })
+     )
+    ]
+   }
+  ],
+
   generationConfig:{
-   responseMimeType:'application/json',
-   responseSchema:schema
+   responseMimeType:
+    'application/json',
+
+   responseSchema:
+    schema
   }
  };
 
  const payloads=
-  ground&&geminiGrounding
+  ground&&
+  geminiGrounding
    ? [
       {
        ...base,
-       tools:[{
-        googleSearch:{}
-       }]
+
+       tools:[
+        {
+         googleSearch:{}
+        }
+       ]
       },
+
       base,
+
       {
        ...base,
+
        generationConfig:{
         responseMimeType:
          'application/json'
@@ -2077,8 +3150,10 @@ async function requestGeminiOfficial(
      ]
    : [
       base,
+
       {
        ...base,
+
        generationConfig:{
         responseMimeType:
          'application/json'
@@ -2088,7 +3163,10 @@ async function requestGeminiOfficial(
 
  let last;
 
- for(const payload of payloads){
+ for(
+  const payload
+  of payloads
+ ){
   last=
    await postModel(
     endpoint,
@@ -2096,18 +3174,25 @@ async function requestGeminiOfficial(
     {
      'Content-Type':
       'application/json',
+
      'x-goog-api-key':
       apiKey()
     }
    );
 
-  if(last.r?.ok){
-   const o=last.o;
-   const c=o.candidates?.[0];
+  if(
+   last.r?.ok
+  ){
+   const o=
+    last.o;
+
+   const c=
+    o.candidates?.[0];
 
    if(
     c?.finishReason&&
-    c.finishReason!=='STOP'
+    c.finishReason!==
+    'STOP'
    ){
     throw Error(
      '模型未完成生成，请重试。'
@@ -2115,36 +3200,60 @@ async function requestGeminiOfficial(
    }
 
    const wrapped={
-    output:[{
-     type:'message',
-     content:
-      (c?.content?.parts||[])
-       .filter(
-        p=>p.text&&!p.thought
+    output:[
+     {
+      type:
+       'message',
+
+      content:
+       (
+        c?.content
+         ?.parts||
+        []
        )
-       .map(p=>({
-        type:'output_text',
-        text:p.text
-       }))
-    }]
+       .filter(
+        p=>
+         p.text&&
+         !p.thought
+       )
+       .map(
+        p=>({
+         type:
+          'output_text',
+
+         text:
+          p.text
+        })
+       )
+     }
+    ]
    };
 
    return attachEvidence(
-    parser(wrapped),
-    evidenceOfGemini(o)
+    parser(
+     wrapped
+    ),
+    evidenceOfGemini(
+     o
+    )
    );
   }
 
   if(
-   ![400,404]
-    .includes(last.r?.status)
+   ![
+    400,
+    404
+   ].includes(
+    last.r?.status
+   )
   ){
    break;
   }
  }
 
  throw modelError(
-  last.r?.status||502,
+  last.r?.status||
+  502,
   last.lastDetail
  );
 }
@@ -2162,11 +3271,18 @@ async function requestOpenAI(
   model,
   instructions,
   input,
+
   text:{
    format:{
-    type:'json_schema',
-    name:'liquid_page',
-    strict:true,
+    type:
+     'json_schema',
+
+    name:
+     'liquid_page',
+
+    strict:
+     true,
+
     schema
    }
   }
@@ -2179,19 +3295,25 @@ async function requestOpenAI(
    {
     'Content-Type':
      'application/json',
+
     Authorization:
      `Bearer ${apiKey()}`
    }
   );
 
- if(!result.r?.ok){
+ if(
+  !result.r?.ok
+ ){
   throw modelError(
-   result.r?.status||502,
+   result.r?.status||
+   502,
    result.lastDetail
   );
  }
 
- return parser(result.o);
+ return parser(
+  result.o
+ );
 }
 
 async function requestModel(
@@ -2202,7 +3324,9 @@ async function requestModel(
  ground=false,
  images=[]
 ){
- if(isCloseAI){
+ if(
+  isCloseAI
+ ){
   return requestCloseAI(
    input,
    instructions,
@@ -2212,7 +3336,9 @@ async function requestModel(
   );
  }
 
- if(isGemini){
+ if(
+  isGemini
+ ){
   return requestGeminiOfficial(
    input,
    instructions,
@@ -2238,56 +3364,98 @@ const pagePrompt=
  '生成一份真正完成用户任务的统一内容结果，之后会被七种界面共同渲染。必须保留全部约束，先给关键判断，再展示思考路径、可比较的信息、可执行步骤与最终选择。若任务涉及购买、品牌、产品选型或商品对比：至少列出3个不同品牌或候选项，分别写清适用人群、关键区别、风险和待核实参数；优先生成type=product_image的section，位置靠近推荐结论或对比表。product_image的media为每个主要候选商品保留一条记录，entity和title写具体品牌+型号，caption写一句与需求相关的推荐理由；如果能核实官网页、品牌页或可信商品页，把页面写入sourceUrl并写明source。直接图片URL只有确认是真实可访问图片时才填写url；无法确认时url返回空字符串，不得编造，后端会继续主动搜索产品页和产品图。product_image的links中为候选项给出搜索入口，label写候选名称，query写完整品牌型号关键词，channel在official、jd、taobao中选择。系统会安全生成站内搜索链接，不得编造商品详情URL。当存在用户上传的原始图片时，必须重新直接观察图片，不得只依赖originalQuery或sharedFacts；明显可见的主体、动物、家具、设备、文字、布局、颜色和空间信息应纳入结果；看不清或无法确认的细节标“图片信息待核实”，禁止臆测。普通上传图片主要作为理解输入，除非用户明确要求展示原图，否则不要为了展示上传图片而使用image组件。image_gallery用于明确需要多图展示的任务。除product_image外，media里只能填写真实可访问的图片URL；所有media记录都必须带title、caption、source、sourceUrl、entity和factIds。所有外部事实必须来自sharedFacts；无法核实的参数或价格明确写待核实，不得伪造来源或精确数据。图片只用于视觉展示，不得把图片本身当作参数事实证据。内容要具体。calculator用rows表示输入字段，第一行固定为[名称,初值,最小值,最大值,步长,单位]；items第一项只用sum或product。comparison/table/barChart使用rows且第一行表头，barChart第二列为数字。checklist/timeline/steps/cards用items。未使用字段返回空数组。用中文。';
 
 const planQuery=
- (q,images=[])=>requestModel(
+ (
   q,
-  planPrompt,
-  planSchema,
-  parsePlan,
-  isGemini,
-  images
- );
+  images=[]
+ )=>
+  requestModel(
+   q,
+   planPrompt,
+   planSchema,
+   parsePlan,
+   isGemini,
+   images
+  );
 
 const generatePage=
- (q,p,images=[])=>requestModel(
-  JSON.stringify({
-   originalQuery:q,
-   sharedConstraints:p.constraints,
-   sharedFacts:p.sharedFacts,
-   contentOutline:p.variants[0].outline,
-   suggestedComponents:[
-    ...new Set(
-     p.variants.flatMap(
-      x=>x.components
-     )
-    )
-   ],
-   imageContext:
-    images.length
-     ? '用户本次上传了原始参考图片。请在生成最终页面时重新直接观察图片，并将明显可见信息纳入结果；不要只依赖sharedFacts。'
-     : ''
-  }),
-  pagePrompt,
-  pageSchema,
-  parsePage,
-  isGemini,
-  images
- );
+ (
+  q,
+  p,
+  images=[]
+ )=>
+  requestModel(
+   JSON.stringify({
+    originalQuery:
+     q,
 
-const sessions=new Map();
-const ttl=2*60*60*1000;
+    sharedConstraints:
+     p.constraints,
+
+    sharedFacts:
+     p.sharedFacts,
+
+    contentOutline:
+     p.variants[0]
+      .outline,
+
+    suggestedComponents:[
+     ...new Set(
+      p.variants
+       .flatMap(
+        x=>
+         x.components
+       )
+     )
+    ],
+
+    imageContext:
+     images.length
+      ? '用户本次上传了原始参考图片。请在生成最终页面时重新直接观察图片，并将明显可见信息纳入结果；不要只依赖sharedFacts。'
+      : ''
+   }),
+
+   pagePrompt,
+
+   pageSchema,
+
+   parsePage,
+
+   isGemini,
+
+   images
+  );
+
+const sessions=
+ new Map();
+
+const ttl=
+ 2*60*60*1000;
 
 function prune(){
- for(const[id,s]of sessions){
+ for(
+  const[
+   id,
+   s
+  ]
+  of sessions
+ ){
   if(
-   Date.now()-s.created>ttl
+   Date.now()-
+   s.created>
+   ttl
   ){
-   sessions.delete(id);
+   sessions.delete(
+    id
+   );
   }
  }
 
- while(sessions.size>=100){
+ while(
+  sessions.size>=100
+ ){
   sessions.delete(
-   sessions.keys()
+   sessions
+    .keys()
     .next()
     .value
   );
@@ -2299,25 +3467,31 @@ function clientIp(req){
   req.headers[
    'x-forwarded-for'
   ]||
-  req.socket.remoteAddress||
+  req.socket
+   .remoteAddress||
   'unknown'
  )
-  .split(',')[0]
-  .trim();
+ .split(',')[0]
+ .trim();
 }
 
 function allowRequest(
  req,
  now=Date.now()
 ){
- const ip=clientIp(req);
+ const ip=
+  clientIp(req);
 
  const recent=
-  (requestLog.get(ip)||[])
-   .filter(
-    time=>
-     now-time<rateWindow
-   );
+  (
+   requestLog.get(ip)||
+   []
+  )
+  .filter(
+   time=>
+    now-time<
+    rateWindow
+  );
 
  if(
   recent.length>=
@@ -2331,7 +3505,9 @@ function allowRequest(
   return false;
  }
 
- recent.push(now);
+ recent.push(
+  now
+ );
 
  requestLog.set(
   ip,
@@ -2339,19 +3515,26 @@ function allowRequest(
  );
 
  if(
-  requestLog.size>10000
+  requestLog.size>
+  10000
  ){
   for(
-   const[key,times]
+   const[
+    key,
+    times
+   ]
    of requestLog
   ){
    if(
     !times.some(
      time=>
-      now-time<rateWindow
+      now-time<
+      rateWindow
     )
    ){
-    requestLog.delete(key);
+    requestLog.delete(
+     key
+    );
    }
   }
  }
@@ -2360,7 +3543,11 @@ function allowRequest(
 }
 
 const send=
- (res,status,data)=>{
+ (
+  res,
+  status,
+  data
+ )=>{
   res.writeHead(
    status,
    {
@@ -2370,7 +3557,9 @@ const send=
   );
 
   res.end(
-   JSON.stringify(data)
+   JSON.stringify(
+    data
+   )
   );
  };
 
@@ -2392,7 +3581,9 @@ function body(
    b+=c;
 
    if(
-    Buffer.byteLength(b)>
+    Buffer.byteLength(
+     b
+    )>
     7000000
    ){
     done=true;
@@ -2401,7 +3592,8 @@ function body(
      res,
      413,
      {
-      error:'输入内容过长。'
+      error:
+       '输入内容过长。'
      }
     );
    }
@@ -2421,17 +3613,23 @@ function body(
 const mime={
  '.html':
   'text/html; charset=utf-8',
+
  '.js':
   'text/javascript; charset=utf-8',
+
  '.css':
   'text/css; charset=utf-8',
+
  '.json':
   'application/json; charset=utf-8'
 };
 
 function createServer(){
  return http.createServer(
-  (req,res)=>{
+  (
+   req,
+   res
+  )=>{
    res.setHeader(
     'Cache-Control',
     'no-store'
@@ -2458,11 +3656,14 @@ function createServer(){
    );
 
    const route=
-    req.url.split('?')[0];
+    req.url
+     .split('?')[0];
 
    if(
-    req.method==='GET'&&
-    route==='/api/image'
+    req.method===
+    'GET'&&
+    route===
+    '/api/image'
    ){
     let target='';
 
@@ -2474,14 +3675,17 @@ function createServer(){
       );
 
      target=
-      requestUrl.searchParams
+      requestUrl
+       .searchParams
        .get('url')||
       '';
+
     }catch{}
 
     if(
      !target||
-     !/^https?:\/\//.test(target)
+     !/^https?:\/\//
+      .test(target)
     ){
      res.writeHead(
       400,
@@ -2496,176 +3700,210 @@ function createServer(){
      );
     }
 
-    (async()=>{
-     const remote=
-      await fetchRemote(
-       target,
-       {
-        method:'GET',
-        headers:{
-         Accept:
-          'image/avif,image/webp,image/apng,image/*,*/*;q=0.8'
+    (
+     async()=>{
+      const remote=
+       await fetchRemote(
+        target,
+        {
+         method:
+          'GET',
+
+         headers:{
+          Accept:
+           'image/avif,image/webp,image/apng,image/*,*/*;q=0.8'
+         }
         }
-       }
-      );
+       );
 
-     if(
-      !remote||
-      !remote.ok
-     ){
-      res.writeHead(
-       404,
-       {
-        'Content-Type':
-         'text/plain; charset=utf-8'
-       }
-      );
+      if(
+       !remote||
+       !remote.ok
+      ){
+       res.writeHead(
+        404,
+        {
+         'Content-Type':
+          'text/plain; charset=utf-8'
+        }
+       );
 
-      return res.end(
-       'Image not found'
-      );
-     }
-
-     const type=
-      String(
-       remote.headers
-        .get('content-type')||
-       ''
-      )
-      .toLowerCase();
-
-     if(!type.startsWith('image/')){
-      try{
-       await remote.body?.cancel();
-      }catch{}
-
-      res.writeHead(
-       415,
-       {
-        'Content-Type':
-         'text/plain; charset=utf-8'
-       }
-      );
-
-      return res.end(
-       'Not an image'
-      );
-     }
-
-     const contentLength=
-      Number(
-       remote.headers
-        .get('content-length')||
-       0
-      );
-
-     if(
-      contentLength>
-      6*1024*1024
-     ){
-      try{
-       await remote.body?.cancel();
-      }catch{}
-
-      res.writeHead(
-       413,
-       {
-        'Content-Type':
-         'text/plain; charset=utf-8'
-       }
-      );
-
-      return res.end(
-       'Image too large'
-      );
-     }
-
-     const data=
-      await limitedBuffer(
-       remote
-      );
-
-     if(!data){
-      res.writeHead(
-       413,
-       {
-        'Content-Type':
-         'text/plain; charset=utf-8'
-       }
-      );
-
-      return res.end(
-       'Image too large'
-      );
-     }
-
-     res.writeHead(
-      200,
-      {
-       'Content-Type':
-        type.split(';')[0],
-       'Cache-Control':
-        'public, max-age=21600',
-       'X-Content-Type-Options':
-        'nosniff'
+       return res.end(
+        'Image not found'
+       );
       }
-     );
 
-     return res.end(data);
-    })().catch(error=>{
-     console.error(
-      '[image-proxy]',
-      error
-     );
+      const type=
+       String(
+        remote.headers
+         .get(
+          'content-type'
+         )||
+        ''
+       )
+       .toLowerCase();
 
-     if(!res.headersSent){
+      if(
+       !type.startsWith(
+        'image/'
+       )
+      ){
+       try{
+        await remote
+         .body
+         ?.cancel();
+       }catch{}
+
+       res.writeHead(
+        415,
+        {
+         'Content-Type':
+          'text/plain; charset=utf-8'
+        }
+       );
+
+       return res.end(
+        'Not an image'
+       );
+      }
+
+      const contentLength=
+       Number(
+        remote.headers
+         .get(
+          'content-length'
+         )||
+        0
+       );
+
+      if(
+       contentLength>
+       6*1024*1024
+      ){
+       try{
+        await remote
+         .body
+         ?.cancel();
+       }catch{}
+
+       res.writeHead(
+        413,
+        {
+         'Content-Type':
+          'text/plain; charset=utf-8'
+        }
+       );
+
+       return res.end(
+        'Image too large'
+       );
+      }
+
+      const data=
+       await limitedBuffer(
+        remote
+       );
+
+      if(!data){
+       res.writeHead(
+        413,
+        {
+         'Content-Type':
+          'text/plain; charset=utf-8'
+        }
+       );
+
+       return res.end(
+        'Image too large'
+       );
+      }
+
       res.writeHead(
-       502,
+       200,
        {
         'Content-Type':
-         'text/plain; charset=utf-8'
+         type.split(';')[0],
+
+        'Cache-Control':
+         'public, max-age=21600',
+
+        'X-Content-Type-Options':
+         'nosniff'
        }
       );
-     }
 
-     res.end(
-      'Image proxy failed'
-     );
-    });
+      return res.end(
+       data
+      );
+     }
+    )()
+    .catch(
+     error=>{
+      console.error(
+       '[image-proxy]',
+       error
+      );
+
+      if(
+       !res.headersSent
+      ){
+       res.writeHead(
+        502,
+        {
+         'Content-Type':
+          'text/plain; charset=utf-8'
+        }
+       );
+      }
+
+      res.end(
+       'Image proxy failed'
+      );
+     }
+    );
 
     return;
    }
 
    if(
-    req.method==='GET'&&
-    route==='/api/health'
+    req.method===
+    'GET'&&
+    route===
+    '/api/health'
    ){
     return send(
      res,
      200,
      {
-      ready:Boolean(
-       apiKey()&&
-       apiKey()!==
-       'your_api_key_here'
-      ),
+      ready:
+       Boolean(
+        apiKey()&&
+        apiKey()!==
+        'your_api_key_here'
+       ),
+
       model,
+
       provider:
        isGemini
         ? 'Gemini'
         : 'OpenAI',
+
       geminiBase:
        isGemini
         ? geminiBase
         : undefined,
+
       geminiGrounding:
        isGemini
         ? geminiGrounding
         : undefined,
+
       isCloseAI:
        isGemini
         ? isCloseAI
         : undefined,
+
       closeAIBase:
        isCloseAI
         ? closeAIBase
@@ -2675,7 +3913,8 @@ function createServer(){
    }
 
    if(
-    req.method==='GET'&&
+    req.method===
+    'GET'&&
     route.startsWith(
      '/api/session/'
     )
@@ -2708,34 +3947,51 @@ function createServer(){
      res,
      200,
      {
-      sessionId:id,
-      query:session.query,
+      sessionId:
+       id,
+
+      query:
+       session.query,
+
       ...session.plan,
+
       pages:
        Object.fromEntries(
-        [...session.pages]
-         .filter(
-          ([,value])=>
-           !(
-            value
-            instanceof Promise
-           )
-         )
+        [
+         ...session.pages
+        ]
+        .filter(
+         (
+          [
+           ,
+           value
+          ]
+         )=>
+          !(
+           value
+           instanceof Promise
+          )
+        )
        )
      }
     );
    }
 
    if(
-    req.method==='POST'&&
+    req.method===
+    'POST'&&
     [
      '/api/generate',
      '/api/plan',
      '/api/page'
-    ].includes(route)
+    ].includes(
+     route
+    )
    ){
     if(
-     !allowRequest(req)
+     !allowRequest(
+      req
+     )
     ){
      res.setHeader(
       'Retry-After',
@@ -2760,7 +4016,10 @@ function createServer(){
 
       try{
        payload=
-        JSON.parse(raw);
+        JSON.parse(
+         raw
+        );
+
       }catch{
        return send(
         res,
@@ -2793,8 +4052,10 @@ function createServer(){
         '/api/plan'
        ){
         const textQuery=
-         typeof payload.query==='string'
-          ? payload.query.trim()
+         typeof payload.query===
+         'string'
+          ? payload.query
+             .trim()
           : '';
 
         const preparedImages=
@@ -2803,11 +4064,16 @@ function createServer(){
          );
 
         const hasImages=
-         preparedImages.length>0;
+         preparedImages.length>
+         0;
 
         if(
-         (!textQuery&&!hasImages)||
-         textQuery.length>9000
+         (
+          !textQuery&&
+          !hasImages
+         )||
+         textQuery.length>
+         9000
         ){
          return send(
           res,
@@ -2839,11 +4105,15 @@ function createServer(){
          {
           query:
            effectiveQuery,
+
           plan,
+
           images:
            preparedImages,
+
           pages:
            new Map(),
+
           created:
            Date.now()
          }
@@ -2853,7 +4123,9 @@ function createServer(){
          res,
          200,
          {
-          sessionId:id,
+          sessionId:
+           id,
+
           ...plan
          }
         );
@@ -2869,8 +4141,10 @@ function createServer(){
          !Number.isInteger(
           payload.variantIndex
          )||
-         payload.variantIndex<0||
-         payload.variantIndex>6
+         payload.variantIndex<
+         0||
+         payload.variantIndex>
+         6
         ){
          return send(
           res,
@@ -2904,49 +4178,59 @@ function createServer(){
         }
 
         if(
-         !session.canonicalPage
+         !session
+          .canonicalPage
         ){
          session.canonicalPage=
           generatePage(
            session.query,
            session.plan,
-           session.images||[]
+           session.images||
+           []
           )
-          .then(page=>
-           ensureProductImageSection(
-            page,
-            session.plan,
-            session.query
-           )
+          .then(
+           page=>
+            ensureProductImageSection(
+             page,
+             session.plan,
+             session.query
+            )
           )
-          .then(page=>
-           enrichProductMedia(
-            page,
-            session.plan
-           )
+          .then(
+           page=>
+            enrichProductMedia(
+             page,
+             session.plan
+            )
           )
-          .then(value=>{
-           session.images=[];
+          .then(
+           value=>{
+            session.images=
+             [];
 
-           for(
-            let i=0;
-            i<7;
-            i++
-           ){
-            session.pages.set(
-             i,
-             value
-            );
+            for(
+             let i=0;
+             i<7;
+             i++
+            ){
+             session.pages
+              .set(
+               i,
+               value
+              );
+            }
+
+            return value;
            }
+          )
+          .catch(
+           error=>{
+            delete session
+             .canonicalPage;
 
-           return value;
-          })
-          .catch(error=>{
-           delete session
-            .canonicalPage;
-
-           throw error;
-          });
+            throw error;
+           }
+          );
         }
 
         return send(
@@ -2960,7 +4244,8 @@ function createServer(){
        if(
         typeof payload.query!==
         'string'||
-        !payload.query.trim()
+        !payload.query
+         .trim()
        ){
         return send(
          res,
@@ -2979,13 +4264,15 @@ function createServer(){
 
        const plan=
         await planQuery(
-         payload.query.trim(),
+         payload.query
+          .trim(),
          preparedImages
         );
 
        const page=
         await generatePage(
-         payload.query.trim(),
+         payload.query
+          .trim(),
          plan,
          preparedImages
         );
@@ -2994,7 +4281,8 @@ function createServer(){
         ensureProductImageSection(
          page,
          plan,
-         payload.query.trim()
+         payload.query
+          .trim()
         );
 
        return send(
@@ -3005,6 +4293,7 @@ function createServer(){
          plan
         )
        );
+
       }catch(error){
        return send(
         res,
@@ -3034,7 +4323,9 @@ function createServer(){
     ![
      'GET',
      'HEAD'
-    ].includes(req.method)||
+    ].includes(
+     req.method
+    )||
     ![
      '/index.html',
      '/app.js',
@@ -3044,9 +4335,13 @@ function createServer(){
      '/evidence.css',
      '/input-media.css',
      '/evaluation-cases.json'
-    ].includes(file)
+    ].includes(
+     file
+    )
    ){
-    res.writeHead(404);
+    res.writeHead(
+     404
+    );
 
     return res.end(
      'Not found'
@@ -3058,14 +4353,17 @@ function createServer(){
     {
      'Content-Type':
       mime[
-       path.extname(file)
+       path.extname(
+        file
+       )
       ]||
       'application/octet-stream'
     }
    );
 
    if(
-    req.method==='HEAD'
+    req.method===
+    'HEAD'
    ){
     return res.end();
    }
@@ -3075,18 +4373,27 @@ function createServer(){
      root,
      file
     )
-   ).pipe(res);
+   )
+   .pipe(
+    res
+   );
   }
  );
 }
 
-if(require.main===module){
+if(
+ require.main===
+ module
+){
  createServer()
   .listen(
    Number(
     process.env.PORT
-   )||3000,
+   )||
+   3000,
+
    '0.0.0.0',
+
    ()=>{
     console.log(
      `Liquid web: http://localhost:${process.env.PORT||3000}`
