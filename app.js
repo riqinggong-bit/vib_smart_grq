@@ -23,7 +23,6 @@ const clip=(v,n)=>{
 };
 
 const imageFiles=[];
-let uploadedMedia=[];
 let plan,page,query='',active=-1,busy=false,checks=new Set();
 
 const pages=new Map();
@@ -638,13 +637,142 @@ function mediaSource(m){
     : `<span>${esc(text)}</span>`;
 }
 
-function mediaCard(m,product=false){
+function normalizeProductText(value=''){
+  return String(value)
+    .toLowerCase()
+    .replace(
+      /[\s\-_·•（）()【】\[\]]+/g,
+      ''
+    );
+}
+
+function productLinksForMedia(
+  m,
+  links=[]
+){
+  const entity=
+    normalizeProductText(
+      m.entity||m.title||''
+    );
+
+  if(!entity){
+    return [];
+  }
+
+  return links
+    .filter(x=>{
+      const text=
+        normalizeProductText(
+          `${x.label||''} ${x.query||''}`
+        );
+
+      return text.includes(entity)||
+        entity.includes(text)||
+        (
+          entity.length>=4&&
+          text.includes(
+            entity.slice(0,4)
+          )
+        );
+    })
+    .slice(0,3);
+}
+
+function productMediaActions(
+  m,
+  links=[]
+){
+  const matched=
+    productLinksForMedia(
+      m,
+      links
+    );
+
+  if(!matched.length){
+    return '';
+  }
+
   return `
-    <figure class="${product?'product-media-card':'media-card'}">
+    <div class="product-media-actions">
+      ${
+        matched
+          .map(x=>`
+            <a
+              href="${linkUrl(x)}"
+              target="_blank"
+              rel="noopener noreferrer"
+              data-channel="${esc(x.channel)}"
+            >
+              ${
+                x.channel==='jd'
+                  ? '去京东看看'
+                  : x.channel==='taobao'
+                    ? '去淘宝看看'
+                    : '查找官网'
+              }
+              <span>→</span>
+            </a>
+          `)
+          .join('')
+      }
+    </div>
+  `;
+}
+
+function mediaCard(
+  m,
+  product=false,
+  links=[]
+){
+  if(product){
+    return `
+      <article class="product-media-card">
+        <div class="product-media-visual">
+          <span class="product-media-badge">
+            产品参考图
+          </span>
+
+          <img
+            src="${esc(m.url)}"
+            alt="${esc(m.title||m.entity||'产品图片')}"
+            loading="lazy"
+            referrerpolicy="no-referrer"
+          >
+        </div>
+
+        <div class="product-media-copy">
+          <small class="product-media-entity">
+            ${esc(m.entity||'候选产品')}
+          </small>
+
+          <h3>
+            ${esc(m.title||m.entity||'候选产品')}
+          </h3>
+
+          ${
+            m.caption
+              ? `<p>${esc(m.caption)}</p>`
+              : ''
+          }
+
+          ${productMediaActions(m,links)}
+
+          <div class="product-media-source">
+            <span>图片来源</span>
+            ${mediaSource(m)}
+          </div>
+        </div>
+      </article>
+    `;
+  }
+
+  return `
+    <figure class="media-card">
       <img
         src="${esc(m.url)}"
         alt="${esc(m.title||m.entity||'参考图片')}"
         loading="lazy"
+        referrerpolicy="no-referrer"
       >
 
       <figcaption>
@@ -680,8 +808,12 @@ function mediaBlock(s){
 
   if(!media.length){
     return `
-      <div class="media-empty">
-        没有可验证图片 URL，因此不展示图片。
+      <div class="media-empty ${s.type==='product_image'?'product-media-empty':''}">
+        ${
+          s.type==='product_image'
+            ? '暂未获取到可验证的产品图片，参数、对比与购买入口仍可正常使用。'
+            : '没有可验证图片 URL，因此不展示图片。'
+        }
       </div>
     `;
   }
@@ -690,118 +822,41 @@ function mediaBlock(s){
     return `
       <div class="media-gallery">
         ${
-          media.map(m=>mediaCard(m)).join('')
+          media
+            .map(m=>mediaCard(m))
+            .join('')
+        }
+      </div>
+    `;
+  }
+
+  if(s.type==='product_image'){
+    return `
+      <div class="product-media-grid">
+        ${
+          media
+            .map(m=>
+              mediaCard(
+                m,
+                true,
+                s.links||[]
+              )
+            )
+            .join('')
         }
       </div>
     `;
   }
 
   return `
-    <div class="${s.type==='product_image'?'product-media-grid':'media-single'}">
+    <div class="media-single">
       ${
         media
-          .map(m=>mediaCard(m,s.type==='product_image'))
+          .map(m=>mediaCard(m))
           .join('')
       }
     </div>
   `;
-}
-
-function uploadedMediaBlock(){
-  if(!uploadedMedia.length){
-    return '';
-  }
-
-  const notes=
-    $('#image-notes')
-      ?.value
-      ?.trim();
-
-  return `
-    <section class="uploaded-media-block">
-      <div>
-        <small>
-          UPLOADED REFERENCE
-        </small>
-
-        <h2>
-          上传参考图
-        </h2>
-
-        ${
-          notes
-            ? `<p>${esc(notes)}</p>`
-            : '<p>AI 已读取这些图片内容，并将可见文字、空间、物体和布局纳入分析。</p>'
-        }
-      </div>
-
-      <div class="uploaded-media-grid">
-        ${
-          uploadedMedia.map(m=>`
-            <figure>
-              <img
-                src="${esc(m.url)}"
-                alt="${esc(m.name)}"
-                loading="lazy"
-              >
-
-              <figcaption>
-                ${esc(m.name)}
-              </figcaption>
-            </figure>
-          `).join('')
-        }
-      </div>
-    </section>
-  `;
-}
-
-function injectUploadedMedia(){
-  const html=
-    uploadedMediaBlock();
-
-  if(!html){
-    return;
-  }
-
-  const main=
-    $('#result main');
-
-  if(!main){
-    return;
-  }
-
-  const holder=
-    document.createElement('div');
-
-  holder.innerHTML=html;
-
-  const block=
-    holder.firstElementChild;
-
-  const anchor=
-    main.querySelector(
-      '.hand-summary,'+
-      '.terminal-main,'+
-      '.magazine-feature,'+
-      '.ice-hero,'+
-      '.minimal-answer,'+
-      '.app-main,'+
-      '.neon-main'
-    );
-
-  if(anchor){
-    anchor.insertAdjacentElement(
-      'afterend',
-      block
-    );
-    return;
-  }
-
-  main.insertBefore(
-    block,
-    main.children[1]||null
-  );
 }
 
 function section(s,n){
@@ -967,7 +1022,13 @@ function section(s,n){
 
       ${c}
 
-      ${actionLinks(s.links)}
+      ${
+        s.type==='product_image'&&
+        Array.isArray(s.media)&&
+        s.media.length
+          ? ''
+          : actionLinks(s.links)
+      }
 
       ${factNote(s.factIds)}
     </section>
@@ -3085,8 +3146,6 @@ function show(){
       v
     );
 
-  injectUploadedMedia();
-
   bindResultEvents();
 
   go('result');
@@ -3269,7 +3328,6 @@ function reset(){
   pages.clear();
   checksets.clear();
   controls.clear();
-  uploadedMedia=[];
 
   $('#query').value='';
   $('#image-notes').value='';
@@ -3437,8 +3495,7 @@ function compressImage(file){
       resolve({
         name:file.name,
         mimeType:dataUrl.slice(5,dataUrl.indexOf(';')),
-        data:dataUrl.split(',')[1],
-        url:dataUrl
+        data:dataUrl.split(',')[1]
       });
     };
 
@@ -3475,8 +3532,7 @@ function readImageFile(file){
             .slice(5,dataUrl.indexOf(';'))||
           file.type||
           'image/png',
-        data:dataUrl.split(',')[1],
-        url:dataUrl
+        data:dataUrl.split(',')[1]
       });
     };
 
@@ -3518,8 +3574,6 @@ $('#query-form').onsubmit=
       buildQuery();
 
     if(!q){
-      $('#error').textContent=
-        '请输入需求，或上传至少一张参考图片。';
       return;
     }
 
@@ -3539,12 +3593,6 @@ $('#query-form').onsubmit=
     try{
       const images=
         await buildImages();
-
-      uploadedMedia=
-        images.map(x=>({
-          name:x.name,
-          url:x.url
-        }));
 
       const r=
         await fetch(
