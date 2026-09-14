@@ -1,0 +1,279 @@
+.media-input{
+  margin-top:16px;
+  padding:16px;
+  border:1px solid #363347;
+  border-radius:8px;
+  background:#171626;
+}
+
+.media-input>label{
+  margin:0 0 10px;
+  color:#d5d1df;
+  font-weight:800;
+}
+
+.media-input input{
+  width:100%;
+  color:#aaa6b7;
+}
+
+.media-input textarea{
+  width:100%;
+  min-height:92px;
+  margin-top:12px;
+  resize:vertical;
+  border:1px solid #363347;
+  border-radius:6px;
+  background:#11101d;
+  color:#fff;
+  padding:13px 15px;
+  line-height:1.7;
+}
+
+.image-list{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-top:10px;
+}
+
+.query-box .image-list:empty{
+  display:none;
+}
+
+.query-box .image-list{
+  margin-top:12px;
+}
+
+.image-list span,
+.image-list small{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  border-radius:999px;
+  background:#252337;
+  color:#aaa6b7;
+  padding:6px 10px;
+  font-size:11px;
+}
+
+.image-list button{
+  display:grid;
+  place-items:center;
+  width:18px;
+  height:18px;
+  border:0;
+  border-radius:50%;
+  background:#ff684b;
+  color:#17131d;
+  font-weight:900;
+  line-height:1;
+}
+
+.media-single,
+.media-gallery,
+.product-media-grid{
+  display:grid;
+  gap:16px;
+  margin-top:22px;
+}
+
+.media-gallery,
+.product-media-grid{
+  grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+}
+
+.media-card,
+.product-media-card{
+  margin:0;
+  overflow:hidden;
+  border:1px solid #d8d2bf;
+  background:#fffdf8;
+}
+
+.media-card img,
+.product-media-card img{
+  display:block;
+  width:100%;
+  aspect-ratio:4/3;
+  object-fit:cover;
+  background:#ede8d8;
+}
+
+.product-media-card img{
+  aspect-ratio:1/1;
+  object-fit:contain;
+  padding:10px;
+}
+
+.media-card figcaption,
+.product-media-card figcaption{
+  display:grid;
+  gap:6px;
+  padding:13px 14px 15px;
+}
+
+.media-card small,
+.product-media-card small{
+  color:#8c7d5b;
+  font-size:11px;
+}
+
+.media-card b,
+.product-media-card b{
+  color:var(--ink);
+}
+
+.media-card p,
+.product-media-card p{
+  margin:0;
+  color:#68776f;
+  line-height:1.6;
+  font-size:12px;
+}
+
+.media-card em,
+.product-media-card em{
+  color:#89968d;
+  font-size:11px;
+  font-style:normal;
+}
+
+.media-card a,
+.product-media-card a{
+  color:var(--accent);
+  font-weight:800;
+  text-decoration:none;
+}
+
+.media-empty{
+  margin-top:18px;
+  padding:13px 14px;
+  background:#fff1e9;
+  color:#a13f28;
+}
+
+.uploaded-media-block{
+  margin:28px 0;
+  padding:22px;
+  border:1px solid currentColor;
+  background:#ffffffc7;
+}
+
+.uploaded-media-block small{
+  color:#8c7d5b;
+  font-size:11px;
+  letter-spacing:.12em;
+}
+
+.uploaded-media-block h2{
+  margin:6px 0 8px;
+}
+
+.uploaded-media-block p{
+  margin:0 0 16px;
+  color:#68776f;
+  line-height:1.7;
+}
+
+.uploaded-media-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+  gap:14px;
+}
+
+.uploaded-media-grid figure{
+  margin:0;
+  overflow:hidden;
+  border:1px solid #d8d2bf;
+  background:#fff;
+}
+
+.uploaded-media-grid img{
+  display:block;
+  width:100%;
+  aspect-ratio:4/3;
+  object-fit:cover;
+}
+
+.uploaded-media-grid figcaption{
+  padding:10px 12px;
+  color:#68776f;
+  font-size:12px;
+  word-break:break-word;
+}
+
+.layout-terminal .uploaded-media-block,
+.layout-neon .uploaded-media-block{
+  background:#12111dcc;
+}
+
+@media(min-width:521px){
+  .table-scroll{
+    max-width:100%;
+    overflow:auto;
+  }
+
+  .table-scroll table{
+    min-width:720px;
+  }
+
+  .table-scroll th:first-child,
+  .table-scroll td:first-child{
+    position:sticky;
+    left:0;
+    z-index:2;
+    background:#fff;
+    box-shadow:1px 0 #d6d6d6;
+  }
+
+  .table-scroll th:first-child{
+    z-index:3;
+    background:#f3f3f3;
+  }
+}
+
+@media(max-width:520px){
+  .table-scroll{
+    overflow:visible;
+  }
+
+  table,
+  thead,
+  tbody,
+  tr,
+  th,
+  td{
+    display:block;
+  }
+
+  thead{
+    display:none;
+  }
+
+  tbody tr{
+    margin-top:12px;
+    border:1px solid #d6d6d6;
+    background:#fff;
+  }
+
+  td{
+    display:grid;
+    grid-template-columns:minmax(88px,38%) 1fr;
+    gap:10px;
+    border:0;
+    border-bottom:1px solid #ececec;
+    text-align:left;
+    word-break:break-word;
+  }
+
+  td:last-child{
+    border-bottom:0;
+  }
+
+  td::before{
+    content:attr(data-label);
+    color:#777;
+    font-weight:800;
+  }
+}
