@@ -1,4 +1,4 @@
-const http=require('http'),fs=require('fs'),path=require('path'),crypto=require('crypto');
+const http=require('http'),fs=require('fs'),path=require('path'),crypto=require('crypto'),dns=require('dns').promises,net=require('net');
 
 const root=__dirname;
 
@@ -850,7 +850,190 @@ function imageParts(
       0,
       4
      )
+     .map(
+      x=>({
+       mimeType:
+        x.mimeType.toLowerCase(),
+
+       data:
+        x.data
+      })
+     )
   : [];
+}
+
+
+const remoteImageLimit=1000000;
+
+
+function imageUrls(text=''){
+
+ const matches=String(text).match(/https?:\/\/[^\s<>"'`]+/gi)||[];
+
+ return [...new Set(matches.map(value=>value.replace(/[),.;!?，。；！？）】]+$/,'')))]
+  .filter(value=>{
+   try{
+    return /^\.(?:png|jpe?g|webp|gif)$/i.test(path.extname(new URL(value).pathname));
+   }catch{
+    return false;
+   }
+  })
+  .slice(0,4);
+}
+
+
+function isPrivateAddress(address){
+
+ if(net.isIPv4(address)){
+  const parts=address.split('.').map(Number);
+  return parts[0]===10||parts[0]===127||parts[0]===0||
+   parts[0]===169&&parts[1]===254||
+   parts[0]===172&&parts[1]>=16&&parts[1]<=31||
+   parts[0]===192&&parts[1]===168||parts[0]>=224;
+ }
+
+ if(net.isIPv6(address)){
+  const value=address.toLowerCase();
+  return value==='::1'||value==='::'||value.startsWith('fc')||
+   value.startsWith('fd')||/^fe[89ab]/.test(value)||
+   value.startsWith('::ffff:127.')||value.startsWith('::ffff:10.')||
+   value.startsWith('::ffff:192.168.');
+ }
+
+ return true;
+}
+
+
+async function assertPublicImageUrl(value){
+
+ const url=new URL(value);
+
+ if(!['http:','https:'].includes(url.protocol)||url.username||url.password||!url.hostname){
+  throw Error('图片 URL 无效。');
+ }
+
+ const addresses=net.isIP(url.hostname)
+  ? [{address:url.hostname}]
+  : await dns.lookup(url.hostname,{all:true});
+
+ if(!addresses.length||addresses.some(item=>isPrivateAddress(item.address))){
+  throw Error('图片 URL 不允许访问本机或内网地址。');
+ }
+
+ return url;
+}
+
+
+async function fetchImageUrl(value){
+
+ let current=value.startsWith('http://')?`https://${value.slice(7)}`:value;
+
+ for(let redirects=0;redirects<4;redirects++){
+
+  await assertPublicImageUrl(current);
+
+  const response=await fetch(current,{
+   redirect:'manual',
+   signal:AbortSignal.timeout(10000),
+   headers:{Accept:'image/*'}
+  });
+
+  if([301,302,303,307,308].includes(response.status)){
+   const location=response.headers.get('location');
+   if(!location)throw Error('图片 URL 重定向无效。');
+   current=new URL(location,current).href;
+   continue;
+  }
+
+  if(!response.ok)throw Error(`图片下载失败（${response.status}）。`);
+
+  const mimeType=(response.headers.get('content-type')||'').split(';')[0].toLowerCase();
+  if(!/^image\/(png|jpe?g|webp|gif)$/i.test(mimeType)){
+   throw Error('URL 返回的内容不是支持的图片格式。');
+  }
+
+  const declaredSize=Number(response.headers.get('content-length'));
+  if(declaredSize>remoteImageLimit)throw Error('URL 图片超过 1 MB 限制。');
+
+  const reader=response.body.getReader(),chunks=[];
+  let size=0;
+
+  while(true){
+   const {done,value:chunk}=await reader.read();
+   if(done)break;
+   size+=chunk.byteLength;
+   if(size>remoteImageLimit){
+    await reader.cancel();
+    throw Error('URL 图片超过 1 MB 限制。');
+   }
+   chunks.push(Buffer.from(chunk));
+  }
+
+  return{
+   mimeType,
+   data:Buffer.concat(chunks).toString('base64'),
+   sourceUrl:current
+  };
+ }
+
+ throw Error('图片 URL 重定向次数过多。');
+}
+
+
+async function imageUrlsToParts(query,limit=4){
+
+ const urls=imageUrls(query).slice(0,Math.max(0,limit));
+ const images=[];
+ const failures=[];
+
+ for(const url of urls){
+  try{
+   images.push(await fetchImageUrl(url));
+  }catch(error){
+   failures.push({
+    url,
+    reason:error.message
+   });
+  }
+ }
+
+ return{
+  images:imageParts(images),
+  failures
+ };
+}
+
+
+async function resolveQueryImages(query,images=[]){
+
+ const uploaded=imageParts(images);
+ const remote=await imageUrlsToParts(query,4-uploaded.length);
+
+ return imageParts([
+  ...uploaded,
+  ...remote.images
+ ]);
+}
+
+
+function describeImageInput(uploaded,remote){
+
+ const success=uploaded.length+remote.images.length;
+ const failed=remote.failures.length;
+
+ if(!success&&!failed){
+  return '未提供图片。';
+ }
+
+ if(!success){
+  return `图片读取失败：${failed} 个图片 URL 均未成功解析，暂时无法进行视觉分析。`;
+ }
+
+ if(failed){
+  return `已成功解析 ${success} 张图片并作为图片数据传入；另有 ${failed} 个图片 URL 读取失败，只允许分析成功传入的图片。`;
+ }
+
+ return `已成功解析 ${success} 张图片并作为图片数据传入。`;
 }
 
 
@@ -2021,20 +2204,21 @@ async function requestModel(
 
 
 const planPrompt=
- '理解用户真正要完成的任务，提取全部硬约束，并规划恰好七种呈现同一份最终答案的网页形态。七种形态依次对应 hand、terminal、magazine、ice、minimal、app、neon；它们只改变叙事顺序、视觉重点与交互方式，不得改变事实、计算、候选项或最终结论。sharedFacts 是统一事实账本：用户内容标 user/provided，无法核实的外部信息标 fact/unverified，假设标 assumption/unverified，计算标 calculation/provided；只有能由搜索引用元数据支撑的外部事实才允许最终升级为 verified；不得伪造来源、价格、库存、参数或商品详情 URL。每个形态给出适合的阅读场景、重点、相同交付目标、3至6节统一内容大纲与有效组件；当用户上传图片、要求配图、商品图片或多图比较时，可选择image、image_gallery、product_image组件。严格限制文字，中文，不追问。';
+ '理解用户真正要完成的任务，提取全部硬约束，并规划恰好七种呈现同一份最终答案的网页形态。七种形态依次对应 hand、terminal、magazine、ice、minimal、app、neon；它们只改变叙事顺序、视觉重点与交互方式，不得改变事实、计算、候选项或最终结论。sharedFacts 是统一事实账本：用户内容标 user/provided，无法核实的外部信息标 fact/unverified，假设标 assumption/unverified，计算标 calculation/provided；只有能由搜索引用元数据支撑的外部事实才允许最终升级为 verified；不得伪造来源、价格、库存、参数或商品详情 URL。系统附加的“图片输入状态”是可信边界：只有状态为成功且本次请求确实包含图片数据时，才允许把直接可见内容写成“图片观察”；读取失败的图片禁止推测其视觉内容，必须记录为“图片读取状态：读取失败，暂时无法进行视觉分析”。图片主要作为理解输入，默认不要求在最终页面展示原图；除非用户明确要求展示图片，或任务本身必须展示图片，否则不要选择image、image_gallery、product_image组件。每个形态给出适合的阅读场景、重点、相同交付目标、3至6节统一内容大纲与有效组件。严格限制文字，中文，不追问。';
 
 
 const pagePrompt=
- '生成一份真正完成用户任务的统一内容结果，之后会被七种界面共同渲染。必须保留全部约束，先给关键判断，再展示思考路径、可比较的信息、可执行步骤与最终选择。若任务涉及购买、品牌或服务选择：至少列出3个不同品牌或候选项，分别写清适用人群、关键区别、风险和待核实参数；在相关section的links中为每个候选项给出搜索入口，label写候选名称，query写完整品牌型号关键词，channel在official、jd、taobao中选择，至少同时覆盖京东和淘宝。系统会安全生成站内搜索链接，不得编造商品详情URL。当存在用户上传的原始图片时，必须重新直接观察图片，不得只依赖originalQuery或sharedFacts。优先识别图片中明显可见的主体对象、动物、家具、设备、文字、空间结构、布局和颜色；例如明显存在猫、狗、人物、商品或设备时，应在最终内容中体现，并明确区分“图片中实际观察到的信息”和“AI建议/推断”。若sharedFacts遗漏了明显视觉信息，应根据原图补充；看不清或无法确认的细节必须标注“图片信息待核实”，禁止臆测。若需要展示图片组件，可使用type=image、image_gallery或product_image；media里只能填写真实可访问的图片URL，必须带title、caption、source、sourceUrl、entity和factIds；没有真实图片URL时media返回空数组，不得编造图片URL。product_image用于商品/品牌/型号图片，image_gallery用于多图参考，image用于单张解释图。非图片组件的media也返回空数组。所有外部事实必须来自sharedFacts；无法核实的参数或价格明确写待核实，不得伪造来源或精确数据。内容要具体。calculator用rows表示输入字段，第一行固定为[名称,初值,最小值,最大值,步长,单位]；items第一项只用sum或product。comparison/table/barChart使用rows且第一行表头，barChart第二列为数字。checklist/timeline/steps/cards用items。未使用字段返回空数组。用中文。';
+ '生成一份真正完成用户任务的统一内容结果，之后会被七种界面共同渲染。必须保留全部约束，先给关键判断，再展示思考路径、可比较的信息、可执行步骤与最终选择。若任务涉及购买、品牌或服务选择：至少列出3个不同品牌或候选项，分别写清适用人群、关键区别、风险和待核实参数；在相关section的links中为每个候选项给出搜索入口，label写候选名称，query写完整品牌型号关键词，channel在official、jd、taobao中选择，至少同时覆盖京东和淘宝。系统会安全生成站内搜索链接，不得编造商品详情URL。严格遵守imageInputStatus：只有本次请求中已成功解析并作为图片数据传入的图片，才能依据其直接可见内容生成“图片观察”；优先识别明显可见的主体对象、动物、家具、设备、文字、空间结构、布局和颜色，并明确区分“图片观察”和“AI建议/推断”。看不清或无法确认的细节必须标注“图片信息待核实”。若图片读取失败，禁止根据URL、文件名或上下文猜测任何视觉内容，必须明确写“图片读取状态：图片读取失败，暂时无法进行视觉分析”。图片主要作为理解输入，默认不展示原图；除非用户明确要求展示图片，或任务本身必须使用图片展示，否则不要使用image、image_gallery、product_image组件，所有section的media返回空数组。确需展示时，media只能填写真实可访问的HTTPS图片URL，不得编造。所有外部事实必须来自sharedFacts；无法核实的参数或价格明确写待核实，不得伪造来源或精确数据。内容要具体。calculator用rows表示输入字段，第一行固定为[名称,初值,最小值,最大值,步长,单位]；items第一项只用sum或product。comparison/table/barChart使用rows且第一行表头，barChart第二列为数字。checklist/timeline/steps/cards用items。未使用字段返回空数组。用中文。';
 
 
 const planQuery=
  (
   q,
-  images=[]
+  images=[],
+  imageInputStatus='未提供图片'
  )=>
   requestModel(
-   q,
+   `${q}\n\n[系统图片输入状态]\n${imageInputStatus}`,
    planPrompt,
    planSchema,
    parsePlan,
@@ -2047,7 +2231,8 @@ const generatePage=
  (
   q,
   p,
-  images=[]
+  images=[],
+  imageInputStatus='未提供图片'
  )=>
   requestModel(
    JSON.stringify({
@@ -2072,10 +2257,12 @@ const generatePage=
      )
     ],
 
+    imageInputStatus,
+
     imageContext:
      images.length
-      ? '用户本次上传了原始参考图片。请在生成最终页面时重新直接观察图片，并将明显可见的主体、动物、家具、设备、文字、布局、颜色和空间信息纳入结果；不要只依赖sharedFacts。'
-      : ''
+      ? '本次请求包含已成功解析的原始图片数据。请重新直接观察图片；图片仅作为理解输入，除非用户明确要求，否则不要在页面展示原图。'
+      : '本次请求没有任何成功解析的图片数据，禁止生成“图片观察”。'
    }),
 
    pagePrompt,
@@ -2337,7 +2524,7 @@ function createServer(){
 
    res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
+    "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: https:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
    );
 
    const route=
@@ -2548,10 +2735,31 @@ function createServer(){
           ? payload.query.trim()
           : '';
 
-        const hasImages=
+        const uploadedImages=
          imageParts(
           payload.images
-         ).length>0;
+         );
+
+        const urlImageResult=
+         await imageUrlsToParts(
+          textQuery,
+          4-uploadedImages.length
+         );
+
+        const resolvedImages=
+         imageParts([
+          ...uploadedImages,
+          ...urlImageResult.images
+         ]);
+
+        const imageInputStatus=
+         describeImageInput(
+          uploadedImages,
+          urlImageResult
+         );
+
+        const hasImages=
+         resolvedImages.length>0;
 
 
         if(
@@ -2582,7 +2790,8 @@ function createServer(){
         const plan=
          await planQuery(
           effectiveQuery,
-          payload.images
+          resolvedImages,
+          imageInputStatus
          );
 
 
@@ -2602,9 +2811,9 @@ function createServer(){
           plan,
 
           images:
-           imageParts(
-            payload.images
-           ),
+           resolvedImages,
+
+          imageInputStatus,
 
           pages:
            new Map(),
@@ -2687,7 +2896,8 @@ function createServer(){
            session.query,
            session.plan,
            session.images||
-           []
+           [],
+           session.imageInputStatus
           )
           .then(
            value=>{
@@ -2761,10 +2971,34 @@ function createServer(){
        }
 
 
+       const uploadedImages=
+        imageParts(
+         payload.images
+        );
+
+       const urlImageResult=
+        await imageUrlsToParts(
+         payload.query.trim(),
+         4-uploadedImages.length
+        );
+
+       const resolvedImages=
+        imageParts([
+         ...uploadedImages,
+         ...urlImageResult.images
+        ]);
+
+       const imageInputStatus=
+        describeImageInput(
+         uploadedImages,
+         urlImageResult
+        );
+
        const plan=
         await planQuery(
          payload.query.trim(),
-         payload.images
+         resolvedImages,
+         imageInputStatus
         );
 
 
@@ -2775,9 +3009,8 @@ function createServer(){
         await generatePage(
          payload.query.trim(),
          plan,
-         imageParts(
-          payload.images
-         )
+         resolvedImages,
+         imageInputStatus
         )
        );
 
@@ -2908,5 +3141,9 @@ module.exports={
  createServer,
  parsePage,
  parsePlan,
- allowRequest
+ allowRequest,
+ imageUrls,
+ imageUrlsToParts,
+ isPrivateAddress,
+ resolveQueryImages
 };
