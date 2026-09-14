@@ -609,6 +609,10 @@ function actionLinks(links=[]){
   `;
 }
 
+/* =========================================================
+   图片 / 产品图
+========================================================= */
+
 function mediaSource(m){
   let host='图片来源';
 
@@ -652,7 +656,9 @@ function productLinksForMedia(
 ){
   const entity=
     normalizeProductText(
-      m.entity||m.title||''
+      m.entity||
+      m.title||
+      ''
     );
 
   if(!entity){
@@ -663,7 +669,13 @@ function productLinksForMedia(
     .filter(x=>{
       const text=
         normalizeProductText(
-          `${x.label||''} ${x.query||''}`
+          `${
+            x.label||
+            ''
+          } ${
+            x.query||
+            ''
+          }`
         );
 
       return text.includes(entity)||
@@ -710,7 +722,10 @@ function productMediaActions(
                     ? '去淘宝看看'
                     : '查找官网'
               }
-              <span>→</span>
+
+              <span>
+                →
+              </span>
             </a>
           `)
           .join('')
@@ -727,75 +742,126 @@ function mediaCard(
   if(product){
     return `
       <article class="product-media-card">
+
         <div class="product-media-visual">
+
           <span class="product-media-badge">
             产品参考图
           </span>
 
           <img
             src="${esc(m.url)}"
-            alt="${esc(m.title||m.entity||'产品图片')}"
+            alt="${esc(
+              m.title||
+              m.entity||
+              '产品图片'
+            )}"
             loading="lazy"
             referrerpolicy="no-referrer"
           >
+
         </div>
 
         <div class="product-media-copy">
+
           <small class="product-media-entity">
-            ${esc(m.entity||'候选产品')}
+            ${esc(
+              m.entity||
+              '候选产品'
+            )}
           </small>
 
           <h3>
-            ${esc(m.title||m.entity||'候选产品')}
+            ${esc(
+              m.title||
+              m.entity||
+              '候选产品'
+            )}
           </h3>
 
           ${
             m.caption
-              ? `<p>${esc(m.caption)}</p>`
+              ? `
+                <p>
+                  ${esc(m.caption)}
+                </p>
+              `
               : ''
           }
 
-          ${productMediaActions(m,links)}
+          ${
+            productMediaActions(
+              m,
+              links
+            )
+          }
 
           <div class="product-media-source">
-            <span>图片来源</span>
+
+            <span>
+              图片来源
+            </span>
+
             ${mediaSource(m)}
+
           </div>
+
         </div>
+
       </article>
     `;
   }
 
   return `
     <figure class="media-card">
+
       <img
         src="${esc(m.url)}"
-        alt="${esc(m.title||m.entity||'参考图片')}"
+        alt="${esc(
+          m.title||
+          m.entity||
+          '参考图片'
+        )}"
         loading="lazy"
         referrerpolicy="no-referrer"
       >
 
       <figcaption>
+
         ${
           m.entity
-            ? `<small>${esc(m.entity)}</small>`
+            ? `
+              <small>
+                ${esc(m.entity)}
+              </small>
+            `
             : ''
         }
 
         <b>
-          ${esc(m.title||'参考图片')}
+          ${esc(
+            m.title||
+            '参考图片'
+          )}
         </b>
 
         ${
           m.caption
-            ? `<p>${esc(m.caption)}</p>`
+            ? `
+              <p>
+                ${esc(m.caption)}
+              </p>
+            `
             : ''
         }
 
         <em>
-          来源：${mediaSource(m)}
+          来源：
+          ${mediaSource(m)}
         </em>
+
       </figcaption>
+
     </figure>
   `;
 }
@@ -808,7 +874,16 @@ function mediaBlock(s){
 
   if(!media.length){
     return `
-      <div class="media-empty ${s.type==='product_image'?'product-media-empty':''}">
+      <div
+        class="
+          media-empty
+          ${
+            s.type==='product_image'
+              ? 'product-media-empty'
+              : ''
+          }
+        "
+      >
         ${
           s.type==='product_image'
             ? '暂未获取到可验证的产品图片，参数、对比与购买入口仍可正常使用。'
@@ -818,46 +893,95 @@ function mediaBlock(s){
     `;
   }
 
-  if(s.type==='image_gallery'){
+  if(
+    s.type===
+    'image_gallery'
+  ){
     return `
       <div class="media-gallery">
+
         ${
           media
-            .map(m=>mediaCard(m))
+            .map(
+              m=>
+                mediaCard(m)
+            )
             .join('')
         }
+
       </div>
     `;
   }
 
-  if(s.type==='product_image'){
+  if(
+    s.type===
+    'product_image'
+  ){
     return `
       <div class="product-media-grid">
+
         ${
           media
-            .map(m=>
-              mediaCard(
-                m,
-                true,
-                s.links||[]
-              )
+            .map(
+              m=>
+                mediaCard(
+                  m,
+                  true,
+                  s.links||
+                  []
+                )
             )
             .join('')
         }
+
       </div>
     `;
   }
 
   return `
     <div class="media-single">
+
       ${
         media
-          .map(m=>mediaCard(m))
+          .map(
+            m=>
+              mediaCard(m)
+          )
           .join('')
       }
+
     </div>
   `;
 }
+
+function isMediaSection(s){
+  return [
+    'image',
+    'image_gallery',
+    'product_image'
+  ].includes(
+    s?.type
+  );
+}
+
+function sectionActionLinks(s){
+  if(
+    s?.type==='product_image'&&
+    Array.isArray(s.media)&&
+    s.media.length
+  ){
+    return '';
+  }
+
+  return actionLinks(
+    s?.links||
+    []
+  );
+}
+
+/* =========================================================
+   通用 Section
+========================================================= */
 
 function section(s,n){
   let c='';
@@ -939,11 +1063,7 @@ function section(s,n){
   }
 
   else if(
-    [
-      'image',
-      'image_gallery',
-      'product_image'
-    ].includes(s.type)
+    isMediaSection(s)
   ){
     c=mediaBlock(s);
   }
@@ -1022,13 +1142,7 @@ function section(s,n){
 
       ${c}
 
-      ${
-        s.type==='product_image'&&
-        Array.isArray(s.media)&&
-        s.media.length
-          ? ''
-          : actionLinks(s.links)
-      }
+      ${sectionActionLinks(s)}
 
       ${factNote(s.factIds)}
     </section>
@@ -1229,6 +1343,12 @@ function renderHand(
 
 function terminalItems(s,n){
   if(
+    isMediaSection(s)
+  ){
+    return mediaBlock(s);
+  }
+
+  if(
     ['table','comparison']
       .includes(s.type)
   ){
@@ -1376,7 +1496,7 @@ function renderTerminalSection(s,n){
 
       ${terminalItems(s,n)}
 
-      ${actionLinks(s.links)}
+      ${sectionActionLinks(s)}
 
       ${factNote(s.factIds)}
     </section>
@@ -1543,6 +1663,12 @@ function renderTerminal(
 
 function magazineContent(s,n){
   if(
+    isMediaSection(s)
+  ){
+    return mediaBlock(s);
+  }
+
+  if(
     ['comparison','table']
       .includes(s.type)
   ){
@@ -1687,7 +1813,7 @@ function renderMagazineStory(s,n){
 
       ${magazineContent(s,n)}
 
-      ${actionLinks(s.links)}
+      ${sectionActionLinks(s)}
 
       ${factNote(s.factIds)}
     </article>
@@ -1808,7 +1934,7 @@ function renderMagazine(
 
                 ${magazineContent(first,0)}
 
-                ${actionLinks(first.links)}
+                ${sectionActionLinks(first)}
 
                 ${factNote(first.factIds)}
               </article>
@@ -1859,6 +1985,12 @@ function iceSection(s,n){
   let body='';
 
   if(
+    isMediaSection(s)
+  ){
+    body=mediaBlock(s);
+  }
+
+  else if(
     ['table','comparison']
       .includes(s.type)
   ){
@@ -1959,7 +2091,7 @@ function iceSection(s,n){
 
       ${body}
 
-      ${actionLinks(s.links)}
+      ${sectionActionLinks(s)}
 
       ${factNote(s.factIds)}
     </section>
@@ -2131,6 +2263,12 @@ function renderIce(
 
 function minimalContent(s,n){
   if(
+    isMediaSection(s)
+  ){
+    return mediaBlock(s);
+  }
+
+  if(
     ['table','comparison']
       .includes(s.type)
   ){
@@ -2279,7 +2417,7 @@ function renderMinimal(
 
                 ${minimalContent(s,n)}
 
-                ${actionLinks(s.links)}
+                ${sectionActionLinks(s)}
 
                 ${factNote(s.factIds)}
               </section>
@@ -2312,6 +2450,12 @@ function renderMinimal(
 ========================================================= */
 
 function appSectionBody(s,n){
+  if(
+    isMediaSection(s)
+  ){
+    return mediaBlock(s);
+  }
+
   if(
     ['table','comparison']
       .includes(s.type)
@@ -2627,7 +2771,7 @@ function renderApp(
 
                   ${appSectionBody(s,n)}
 
-                  ${actionLinks(s.links)}
+                  ${sectionActionLinks(s)}
 
                   ${factNote(s.factIds)}
                 </section>
@@ -2651,6 +2795,12 @@ function neonSection(s,n){
   let body='';
 
   if(
+    isMediaSection(s)
+  ){
+    body=mediaBlock(s);
+  }
+
+  else if(
     ['table','comparison']
       .includes(s.type)
   ){
@@ -2756,7 +2906,7 @@ function neonSection(s,n){
 
       ${body}
 
-      ${actionLinks(s.links)}
+      ${sectionActionLinks(s)}
 
       ${factNote(s.factIds)}
     </section>
@@ -3375,7 +3525,13 @@ function renderImageList(){
           `
             <span title="${esc(f.name)}">
               ${esc(clip(f.name,22))}
-              <button type="button" data-remove-image="${i}" aria-label="删除 ${esc(f.name)}">×</button>
+              <button
+                type="button"
+                data-remove-image="${i}"
+                aria-label="删除 ${esc(f.name)}"
+              >
+                ×
+              </button>
             </span>
           `
         )
@@ -3394,23 +3550,38 @@ $('#image-list').onclick=e=>{
   }
 
   imageFiles.splice(
-    Number(btn.dataset.removeImage),
+    Number(
+      btn.dataset.removeImage
+    ),
     1
   );
 
   $('#reference-images').value='';
+
   renderImageList();
 };
 
 $('#reference-images').onchange=e=>{
   imageFiles.push(
-    ...[...e.target.files]
-      .filter(f=>
-        /^image\//.test(f.type)
+    ...[
+      ...e.target.files
+    ]
+      .filter(
+        f=>
+          /^image\//
+            .test(f.type)
       )
-      .slice(0,4-imageFiles.length)
+      .slice(
+        0,
+        4-imageFiles.length
+      )
       .map(
-        file=>({file,name:file.name,type:file.type,size:file.size})
+        file=>({
+          file,
+          name:file.name,
+          type:file.type,
+          size:file.size
+        })
       )
   );
 
@@ -3451,97 +3622,162 @@ function buildQuery(){
 }
 
 function compressImage(file){
-  return new Promise((resolve,reject)=>{
-    const img=new Image();
-    const url=URL.createObjectURL(file);
+  return new Promise(
+    (resolve,reject)=>{
+      const img=
+        new Image();
 
-    img.onload=()=>{
-      const max=1280;
-      const scale=Math.min(
-        1,
-        max/Math.max(img.width,img.height)
-      );
-      const canvas=document.createElement('canvas');
-
-      canvas.width=Math.max(
-        1,
-        Math.round(img.width*scale)
-      );
-      canvas.height=Math.max(
-        1,
-        Math.round(img.height*scale)
-      );
-
-      canvas
-        .getContext('2d')
-        .drawImage(
-          img,
-          0,
-          0,
-          canvas.width,
-          canvas.height
+      const url=
+        URL.createObjectURL(
+          file
         );
 
-      URL.revokeObjectURL(url);
+      img.onload=()=>{
+        const max=1280;
 
-      const dataUrl=
-        canvas.toDataURL(
-          file.type==='image/png'
-            ? 'image/png'
-            : 'image/jpeg',
-          .82
+        const scale=
+          Math.min(
+            1,
+            max/
+            Math.max(
+              img.width,
+              img.height
+            )
+          );
+
+        const canvas=
+          document.createElement(
+            'canvas'
+          );
+
+        canvas.width=
+          Math.max(
+            1,
+            Math.round(
+              img.width*
+              scale
+            )
+          );
+
+        canvas.height=
+          Math.max(
+            1,
+            Math.round(
+              img.height*
+              scale
+            )
+          );
+
+        canvas
+          .getContext('2d')
+          .drawImage(
+            img,
+            0,
+            0,
+            canvas.width,
+            canvas.height
+          );
+
+        URL.revokeObjectURL(
+          url
         );
 
-      resolve({
-        name:file.name,
-        mimeType:dataUrl.slice(5,dataUrl.indexOf(';')),
-        data:dataUrl.split(',')[1]
-      });
-    };
+        const dataUrl=
+          canvas.toDataURL(
+            file.type==='image/png'
+              ? 'image/png'
+              : 'image/jpeg',
+            .82
+          );
 
-    img.onerror=()=>{
-      URL.revokeObjectURL(url);
-      reject(
-        Error('图片压缩失败。')
-      );
-    };
+        resolve({
+          name:file.name,
 
-    img.src=url;
-  });
+          mimeType:
+            dataUrl.slice(
+              5,
+              dataUrl.indexOf(';')
+            ),
+
+          data:
+            dataUrl
+              .split(',')[1]
+        });
+      };
+
+      img.onerror=()=>{
+        URL.revokeObjectURL(
+          url
+        );
+
+        reject(
+          Error(
+            '图片压缩失败。'
+          )
+        );
+      };
+
+      img.src=url;
+    }
+  );
 }
 
 function readImageFile(file){
-  return new Promise((resolve,reject)=>{
-    const reader=new FileReader();
+  return new Promise(
+    (resolve,reject)=>{
+      const reader=
+        new FileReader();
 
-    reader.onload=()=>{
-      const dataUrl=
-        String(reader.result||'');
+      reader.onload=()=>{
+        const dataUrl=
+          String(
+            reader.result||
+            ''
+          );
 
-      if(!dataUrl.includes(',')){
-        reject(
-          Error('图片读取失败，请换一张图片。')
-        );
-        return;
-      }
+        if(
+          !dataUrl.includes(',')
+        ){
+          reject(
+            Error(
+              '图片读取失败，请换一张图片。'
+            )
+          );
 
-      resolve({
-        name:file.name,
-        mimeType:
-          dataUrl
-            .slice(5,dataUrl.indexOf(';'))||
-          file.type||
-          'image/png',
-        data:dataUrl.split(',')[1]
-      });
-    };
+          return;
+        }
 
-    reader.onerror=()=>reject(
-      Error('图片读取失败，请换一张图片。')
-    );
+        resolve({
+          name:file.name,
 
-    reader.readAsDataURL(file);
-  });
+          mimeType:
+            dataUrl
+              .slice(
+                5,
+                dataUrl.indexOf(';')
+              )||
+            file.type||
+            'image/png',
+
+          data:
+            dataUrl
+              .split(',')[1]
+        });
+      };
+
+      reader.onerror=
+        ()=>
+          reject(
+            Error(
+              '图片读取失败，请换一张图片。'
+            )
+          );
+
+      reader.readAsDataURL(
+        file
+      );
+    }
+  );
 }
 
 async function buildImages(){
@@ -3549,9 +3785,13 @@ async function buildImages(){
     imageFiles.map(
       async x=>{
         try{
-          return await compressImage(x.file);
+          return await compressImage(
+            x.file
+          );
         }catch{
-          return readImageFile(x.file);
+          return readImageFile(
+            x.file
+          );
         }
       }
     )
@@ -3573,7 +3813,14 @@ $('#query-form').onsubmit=
     const q=
       buildQuery();
 
-    if(!q){
+    if(
+      !q&&
+      !imageFiles.length
+    ){
+      $('#error')
+        .textContent=
+          '请输入需求，或上传至少一张参考图片。';
+
       return;
     }
 
@@ -3691,7 +3938,8 @@ async function restore(){
   }
 
   query=
-    s.query||'';
+    s.query||
+    '';
 
   $('#query').value=
     query;
@@ -3730,7 +3978,8 @@ async function restore(){
     );
 
     Object.entries(
-      s.checks||{}
+      s.checks||
+      {}
     ).forEach(
       ([k,v])=>
         checksets.set(
@@ -3740,7 +3989,8 @@ async function restore(){
     );
 
     Object.entries(
-      s.controls||{}
+      s.controls||
+      {}
     ).forEach(
       ([k,v])=>
         controls.set(
@@ -3761,21 +4011,30 @@ async function restore(){
 
     if(
       s.showResult&&
-      pages.has(s.active)
+      pages.has(
+        s.active
+      )
     ){
       active=
         s.active;
 
       page=
-        pages.get(active);
+        pages.get(
+          active
+        );
 
       checks=
-        checksets.get(active)||
+        checksets.get(
+          active
+        )||
         new Set();
 
       show();
+
     }else{
-      go('selection');
+      go(
+        'selection'
+      );
     }
 
   }catch{
@@ -3787,7 +4046,9 @@ async function restore(){
       storeKey
     );
 
-    go('start');
+    go(
+      'start'
+    );
   }
 }
 
@@ -3795,19 +4056,25 @@ async function restore(){
    Health
 ========================================================= */
 
-fetch('/api/health')
+fetch(
+  '/api/health'
+)
   .then(
     r=>r.json()
   )
   .then(s=>{
-    $('#connection').textContent=
-      s.ready
-        ? '● 模型已连接 · 内容统一 · 七种形态'
-        : '请先配置模型密钥';
+    $('#connection')
+      .textContent=
+        s.ready
+          ? '● 模型已连接 · 内容统一 · 七种形态'
+          : '请先配置模型密钥';
   })
   .catch(()=>{
-    $('#connection').textContent=
-      '服务正在唤醒，首次打开可能需要约一分钟';
+    $('#connection')
+      .textContent=
+        '服务正在唤醒，首次打开可能需要约一分钟';
   });
+
+renderImageList();
 
 restore();
