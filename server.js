@@ -1037,6 +1037,73 @@ function describeImageInput(uploaded,remote){
 }
 
 
+function imageDisplayRequested(query=''){
+ return /(?:展示|显示|配图|图片墙|图片对比|产品图|商品图|竞品图|品牌图|找图|搜索图片|搜图|show|display|gallery)\s*(?:相关|产品|商品|品牌|竞品|图片|image)?/i.test(String(query));
+}
+
+
+async function verifyDisplayMedia(page,enabled){
+ if(!enabled){
+  for(const section of page.sections)section.media=[];
+  return page;
+ }
+ let remaining=6;
+ for(const section of page.sections){
+  if(!['image','image_gallery','product_image'].includes(section.type)){
+   section.media=[];
+   continue;
+  }
+  const verified=[];
+  for(const media of section.media.slice(0,remaining)){
+   try{
+    const checked=await fetchImageUrl(media.url);
+    verified.push({...media,url:checked.sourceUrl});
+    remaining--;
+   }catch{}
+   if(!remaining)break;
+  }
+  section.media=verified;
+ }
+ return page;
+}
+
+
+async function commonsImage(entity){
+ const endpoint='https://commons.wikimedia.org/w/api.php?'+new URLSearchParams({action:'query',generator:'search',gsrsearch:`${entity} product`,gsrnamespace:'6',gsrlimit:'3',prop:'imageinfo',iiprop:'url|mime',iiurlwidth:'900',format:'json',origin:'*'});
+ const response=await fetch(endpoint,{signal:AbortSignal.timeout(10000),headers:{Accept:'application/json'}});
+ if(!response.ok)return null;
+ const data=await response.json();
+ const pages=Object.values(data.query?.pages||{});
+ for(const item of pages){
+  const info=item.imageinfo?.[0];
+  const url=info?.thumburl||info?.url;
+  if(!url||!/^image\/(png|jpe?g|webp)$/i.test(info.mime||''))continue;
+  try{
+   const checked=await fetchImageUrl(url);
+   return{url:checked.sourceUrl,title:entity,caption:`${entity} 的公开参考图片，具体产品型号以来源页面为准。`,source:'Wikimedia Commons',sourceUrl:info.descriptionurl||'https://commons.wikimedia.org/',entity,factIds:[]};
+  }catch{}
+ }
+ return null;
+}
+
+
+async function addDisplayMediaFallback(page,enabled){
+ if(!enabled||page.sections.some(section=>section.media.length))return page;
+ const entities=[...new Set(page.sections.flatMap(section=>section.links.map(link=>link.label)))].filter(Boolean).slice(0,3);
+ const media=[];
+ for(const entity of entities){
+  try{
+   const item=await commonsImage(entity);
+   if(item)media.push(item);
+  }catch{}
+ }
+ if(!media.length)return page;
+ const section={type:'product_image',heading:'品牌与竞品图片',intro:'以下为经过访问校验的公开参考图片；产品版本与型号请以来源页面为准。',items:[],rows:[],resultLabel:'',factIds:[],links:[],media};
+ if(page.sections.length<8)page.sections.push(section);
+ return page;
+}
+
+
 function normalizeMedia(
  list=[]
 ){
@@ -2208,7 +2275,7 @@ const planPrompt=
 
 
 const pagePrompt=
- '生成一份真正完成用户任务的统一内容结果，之后会被七种界面共同渲染。必须保留全部约束，先给关键判断，再展示思考路径、可比较的信息、可执行步骤与最终选择。若任务涉及购买、品牌或服务选择：至少列出3个不同品牌或候选项，分别写清适用人群、关键区别、风险和待核实参数；在相关section的links中为每个候选项给出搜索入口，label写候选名称，query写完整品牌型号关键词，channel在official、jd、taobao中选择，至少同时覆盖京东和淘宝。系统会安全生成站内搜索链接，不得编造商品详情URL。严格遵守imageInputStatus：只有本次请求中已成功解析并作为图片数据传入的图片，才能依据其直接可见内容生成“图片观察”；优先识别明显可见的主体对象、动物、家具、设备、文字、空间结构、布局和颜色，并明确区分“图片观察”和“AI建议/推断”。看不清或无法确认的细节必须标注“图片信息待核实”。若图片读取失败，禁止根据URL、文件名或上下文猜测任何视觉内容，必须明确写“图片读取状态：图片读取失败，暂时无法进行视觉分析”。图片主要作为理解输入，默认不展示原图；除非用户明确要求展示图片，或任务本身必须使用图片展示，否则不要使用image、image_gallery、product_image组件，所有section的media返回空数组。确需展示时，media只能填写真实可访问的HTTPS图片URL，不得编造。所有外部事实必须来自sharedFacts；无法核实的参数或价格明确写待核实，不得伪造来源或精确数据。内容要具体。calculator用rows表示输入字段，第一行固定为[名称,初值,最小值,最大值,步长,单位]；items第一项只用sum或product。comparison/table/barChart使用rows且第一行表头，barChart第二列为数字。checklist/timeline/steps/cards用items。未使用字段返回空数组。用中文。';
+ '生成一份真正完成用户任务的统一内容结果，之后会被七种界面共同渲染。必须保留全部约束，先给关键判断，再展示思考路径、可比较的信息、可执行步骤与最终选择。若任务涉及购买、品牌或服务选择：至少列出3个不同品牌或候选项，分别写清适用人群、关键区别、风险和待核实参数；在相关section的links中为每个候选项给出搜索入口，label写候选名称，query写完整品牌型号关键词，channel在official、jd、taobao中选择，至少同时覆盖京东和淘宝。系统会安全生成站内搜索链接，不得编造商品详情URL。严格遵守imageInputStatus：只有本次请求中已成功解析并作为图片数据传入的图片，才能依据其直接可见内容生成“图片观察”；优先识别明显可见的主体对象、动物、家具、设备、文字、空间结构、布局和颜色，并明确区分“图片观察”和“AI建议/推断”。看不清或无法确认的细节必须标注“图片信息待核实”。若图片读取失败，禁止根据URL、文件名或上下文猜测任何视觉内容，必须明确写“图片读取状态：图片读取失败，暂时无法进行视觉分析”。图片主要作为理解输入，默认不展示原图。严格遵守displayImagesRequired：为false时不得使用image、image_gallery、product_image且所有media必须为空；为true时应为当前品牌和主要竞品增加product_image或image_gallery section，每张图片填写真实可直接访问的HTTPS图片URL，并准确填写品牌/产品名称、caption、来源名称与sourceUrl。优先品牌官网、官方旗舰店或可信资料页；找不到可靠图片时media返回空数组，禁止编造、错配或用无关图片替代。服务器会再次下载校验图片，无法访问的图片会被删除。所有外部事实必须来自sharedFacts；无法核实的参数或价格明确写待核实，不得伪造来源或精确数据。内容要具体。calculator用rows表示输入字段，第一行固定为[名称,初值,最小值,最大值,步长,单位]；items第一项只用sum或product。comparison/table/barChart使用rows且第一行表头，barChart第二列为数字。checklist/timeline/steps/cards用items。未使用字段返回空数组。用中文。';
 
 
 const planQuery=
@@ -2228,13 +2295,14 @@ const planQuery=
 
 
 const generatePage=
- (
+ async (
   q,
   p,
   images=[],
   imageInputStatus='未提供图片'
- )=>
-  requestModel(
+ )=>{
+  const displayImages=imageDisplayRequested(q);
+  const page=await requestModel(
    JSON.stringify({
     originalQuery:
      q,
@@ -2259,6 +2327,8 @@ const generatePage=
 
     imageInputStatus,
 
+    displayImagesRequired:displayImages,
+
     imageContext:
      images.length
       ? '本次请求包含已成功解析的原始图片数据。请重新直接观察图片；图片仅作为理解输入，除非用户明确要求，否则不要在页面展示原图。'
@@ -2275,6 +2345,10 @@ const generatePage=
 
    images
   );
+
+  await verifyDisplayMedia(page,displayImages);
+  return addDisplayMediaFallback(page,displayImages);
+ };
 
 
 const sessions=
@@ -3144,6 +3218,8 @@ module.exports={
  allowRequest,
  imageUrls,
  imageUrlsToParts,
+ imageDisplayRequested,
+ verifyDisplayMedia,
  isPrivateAddress,
  resolveQueryImages
 };

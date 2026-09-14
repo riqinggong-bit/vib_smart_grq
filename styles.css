@@ -88,6 +88,14 @@ button{
   text-align:left;
 }
 
+.query-box{
+  border:1px solid #363347;
+  border-radius:14px;
+  background:#1b1a2a;
+  padding:22px 26px 18px;
+  box-shadow:0 18px 50px #0003;
+}
+
 .query-panel label{
   display:block;
   color:#aaa6b7;
@@ -99,25 +107,25 @@ button{
     14px;
 }
 
+.query-box>label{
+  margin:0;
+  padding-bottom:16px;
+  border-bottom:1px solid #302e41;
+}
+
 .query-panel textarea{
   width:100%;
   min-height:190px;
   resize:vertical;
-  border:
-    1px
-    solid
-    #363347;
-  border-radius:8px;
-  background:#1b1a2a;
+  border:0;
+  border-radius:0;
+  background:transparent;
   color:#fff;
-  padding:26px;
+  padding:18px 0 8px;
   font-size:16px;
   line-height:1.8;
-  box-shadow:
-    0
-    18px
-    50px
-    #0003;
+  box-shadow:none;
+  outline:none;
 }
 
 .primary{
@@ -125,8 +133,8 @@ button{
   margin:26px auto 0;
   border:0;
   border-radius:999px;
-  background:#ff684b;
-  color:#17131d;
+  background:linear-gradient(135deg,#ff7a45,#ff4e2e);
+  color:#fff;
   padding:
     15px
     30px;
@@ -4150,4 +4158,3 @@ tbody tr[data-choice]:focus{
 #reference-images[hidden]{
   display:none!important;
 }
-
