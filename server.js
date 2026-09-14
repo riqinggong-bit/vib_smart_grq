@@ -356,10 +356,7 @@ function attachEvidence(p,evidence=[]){
       )
      ).slice(0,3);
 
-  const attached=
-   ev.length
-    ? ev
-    : pool.slice(0,2);
+  const attached=ev;
 
   return attached.length
    ? {
@@ -421,14 +418,8 @@ function normalizeMedia(
      (
       keepUnresolved&&
       entity&&
-      (
-       !url||
-       /^https?:\/\//.test(url)
-      )&&
-      (
-       !sourceUrl||
-       /^https?:\/\//.test(sourceUrl)
-      )
+      (!url||/^https?:\/\//.test(url))&&
+      (!sourceUrl||/^https?:\/\//.test(sourceUrl))
      );
    })
    .slice(0,12)
@@ -436,31 +427,16 @@ function normalizeMedia(
     url:/^https?:\/\//.test(x.url||'')
      ? x.url.trim()
      : '',
-
     title:clean(
      x.title||x.entity||'参考图片',
      80
     ),
-
-    caption:clean(
-     x.caption||'',
-     160
-    ),
-
-    source:clean(
-     x.source||'',
-     80
-    ),
-
+    caption:clean(x.caption||'',160),
+    source:clean(x.source||'',80),
     sourceUrl:/^https?:\/\//.test(x.sourceUrl||'')
      ? x.sourceUrl.trim()
      : '',
-
-    entity:clean(
-     x.entity||x.title||'',
-     80
-    ),
-
+    entity:clean(x.entity||x.title||'',80),
     factIds:Array.isArray(x.factIds)
      ? x.factIds
       .filter(y=>typeof y==='string')
@@ -505,15 +481,11 @@ async function safeRemoteUrl(raw){
  try{
   const u=new URL(raw);
 
-  if(
-   !['http:','https:']
-    .includes(u.protocol)
-  ){
+  if(!['http:','https:'].includes(u.protocol)){
    return false;
   }
 
-  const host=u.hostname
-   .toLowerCase();
+  const host=u.hostname.toLowerCase();
 
   if(
    host==='localhost'||
@@ -524,23 +496,14 @@ async function safeRemoteUrl(raw){
    return false;
   }
 
-  if(
-   net.isIP(host)&&
-   privateAddress(host)
-  ){
+  if(net.isIP(host)&&privateAddress(host)){
    return false;
   }
 
-  const addresses=
-   await dns.lookup(
-    host,
-    {all:true}
-   );
+  const addresses=await dns.lookup(host,{all:true});
 
   return addresses.length>0&&
-   addresses.every(
-    x=>!privateAddress(x.address)
-   );
+   addresses.every(x=>!privateAddress(x.address));
  }catch{
   return false;
  }
@@ -551,10 +514,7 @@ async function fetchRemote(
  options={},
  redirectCount=0
 ){
- if(
-  redirectCount>3||
-  !await safeRemoteUrl(raw)
- ){
+ if(redirectCount>3||!await safeRemoteUrl(raw)){
   return null;
  }
 
@@ -568,10 +528,8 @@ async function fetchRemote(
     redirect:'manual',
     signal:AbortSignal.timeout(10000),
     headers:{
-     'User-Agent':
-      'Mozilla/5.0 (compatible; LiquidIntelligentWeb/1.0)',
-     'Accept-Language':
-      'zh-CN,zh;q=0.9,en;q=0.8',
+     'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/145 Safari/537.36',
+     'Accept-Language':'zh-CN,zh;q=0.9,en;q=0.8',
      ...(options.headers||{})
     }
    }
@@ -580,12 +538,8 @@ async function fetchRemote(
   return null;
  }
 
- if(
-  [301,302,303,307,308]
-   .includes(response.status)
- ){
-  const location=
-   response.headers.get('location');
+ if([301,302,303,307,308].includes(response.status)){
+  const location=response.headers.get('location');
 
   if(!location){
    return null;
@@ -594,44 +548,33 @@ async function fetchRemote(
   let next;
 
   try{
-   next=new URL(
-    location,
-    raw
-   ).href;
+   next=new URL(location,raw).href;
   }catch{
    return null;
   }
 
-  return fetchRemote(
-   next,
-   options,
-   redirectCount+1
-  );
+  try{
+   await response.body?.cancel();
+  }catch{}
+
+  return fetchRemote(next,options,redirectCount+1);
  }
 
  return response;
 }
 
-async function limitedText(
- response,
- maxBytes=1500000
-){
+async function limitedText(response,maxBytes=1500000){
  if(!response?.body){
   return '';
  }
 
- const reader=
-  response.body.getReader();
-
- const decoder=
-  new TextDecoder();
-
+ const reader=response.body.getReader();
+ const decoder=new TextDecoder();
  let total=0;
  let text='';
 
  while(true){
-  const{done,value}=
-   await reader.read();
+  const{done,value}=await reader.read();
 
   if(done){
    break;
@@ -640,22 +583,44 @@ async function limitedText(
   total+=value.byteLength;
 
   if(total>maxBytes){
-   try{
-    await reader.cancel();
-   }catch{}
-
+   try{await reader.cancel();}catch{}
    break;
   }
 
-  text+=decoder.decode(
-   value,
-   {stream:true}
-  );
+  text+=decoder.decode(value,{stream:true});
  }
 
  text+=decoder.decode();
-
  return text;
+}
+
+async function limitedBuffer(response,maxBytes=6*1024*1024){
+ if(!response?.body){
+  return null;
+ }
+
+ const reader=response.body.getReader();
+ const chunks=[];
+ let total=0;
+
+ while(true){
+  const{done,value}=await reader.read();
+
+  if(done){
+   break;
+  }
+
+  total+=value.byteLength;
+
+  if(total>maxBytes){
+   try{await reader.cancel();}catch{}
+   return null;
+  }
+
+  chunks.push(Buffer.from(value));
+ }
+
+ return Buffer.concat(chunks,total);
 }
 
 function decodeHtml(value=''){
@@ -665,33 +630,29 @@ function decodeHtml(value=''){
   .replace(/&#39;|&apos;/gi,"'")
   .replace(/&lt;/gi,'<')
   .replace(/&gt;/gi,'>')
+  .replace(/&#x2F;/gi,'/')
   .trim();
 }
 
-function metaContent(
- html,
- key
-){
- const escaped=key
-  .replace(
-   /[.*+?^${}()|[\]\\]/g,
-   '\\$&'
-  );
+function stripTags(value=''){
+ return decodeHtml(
+  String(value)
+   .replace(/<script[\s\S]*?<\/script>/gi,' ')
+   .replace(/<style[\s\S]*?<\/style>/gi,' ')
+   .replace(/<[^>]+>/g,' ')
+   .replace(/\s+/g,' ')
+ );
+}
 
+function metaContent(html,key){
+ const escaped=key.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
  const patterns=[
-  new RegExp(
-   `<meta[^>]+(?:property|name)=["']${escaped}["'][^>]+content=["']([^"']+)["'][^>]*>`,
-   'i'
-  ),
-  new RegExp(
-   `<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${escaped}["'][^>]*>`,
-   'i'
-  )
+  new RegExp(`<meta[^>]+(?:property|name)=["']${escaped}["'][^>]+content=["']([^"']+)["'][^>]*>`,'i'),
+  new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${escaped}["'][^>]*>`,'i')
  ];
 
  for(const pattern of patterns){
   const match=html.match(pattern);
-
   if(match?.[1]){
    return decodeHtml(match[1]);
   }
@@ -700,27 +661,12 @@ function metaContent(
  return '';
 }
 
-function pageImageCandidates(
- html,
- pageUrl
-){
+function pageImageCandidates(html,pageUrl){
  const values=[
-  metaContent(
-   html,
-   'og:image:secure_url'
-  ),
-  metaContent(
-   html,
-   'og:image'
-  ),
-  metaContent(
-   html,
-   'twitter:image'
-  ),
-  metaContent(
-   html,
-   'twitter:image:src'
-  )
+  metaContent(html,'og:image:secure_url'),
+  metaContent(html,'og:image'),
+  metaContent(html,'twitter:image'),
+  metaContent(html,'twitter:image:src')
  ];
 
  const linkMatch=html.match(
@@ -728,35 +674,21 @@ function pageImageCandidates(
  );
 
  if(linkMatch?.[1]){
-  values.push(
-   decodeHtml(linkMatch[1])
-  );
+  values.push(decodeHtml(linkMatch[1]));
  }
 
  return values
   .filter(Boolean)
   .map(value=>{
-   try{
-    return new URL(
-     value,
-     pageUrl
-    ).href;
-   }catch{
-    return '';
-   }
+   try{return new URL(value,pageUrl).href;}catch{return '';}
   })
   .filter(Boolean)
-  .filter(
-   (x,i,a)=>a.indexOf(x)===i
-  )
-  .slice(0,6);
+  .filter((x,i,a)=>a.indexOf(x)===i)
+  .slice(0,8);
 }
 
 async function verifiedImageUrl(raw){
- if(
-  typeof raw!=='string'||
-  !/^https?:\/\//.test(raw)
- ){
+ if(typeof raw!=='string'||!/^https?:\/\//.test(raw)){
   return '';
  }
 
@@ -777,116 +709,65 @@ async function verifiedImageUrl(raw){
  }
 
  for(const candidate of candidates){
-  const response=
-   await fetchRemote(
-    candidate,
-    {
-     method:'GET',
-     headers:{
-      Range:'bytes=0-4095',
-      Accept:'image/avif,image/webp,image/apng,image/*,*/*;q=0.8'
-     }
+  const response=await fetchRemote(
+   candidate,
+   {
+    method:'GET',
+    headers:{
+     Range:'bytes=0-4095',
+     Accept:'image/avif,image/webp,image/apng,image/*,*/*;q=0.8'
     }
-   );
+   }
+  );
 
   if(!response){
    continue;
   }
 
-  const type=String(
-   response.headers.get(
-    'content-type'
-   )||''
-  ).toLowerCase();
+  const type=String(response.headers.get('content-type')||'').toLowerCase();
 
-  if(
-   (response.ok||response.status===206)&&
-   type.startsWith('image/')
-  ){
+  if((response.ok||response.status===206)&&type.startsWith('image/')){
    const finalUrl=response.url||candidate;
-
-   if(
-    /^https:\/\//.test(finalUrl)
-   ){
-    try{
-     await response.body?.cancel();
-    }catch{}
-
-    return finalUrl;
-   }
+   try{await response.body?.cancel();}catch{}
+   return finalUrl;
   }
 
-  try{
-   await response.body?.cancel();
-  }catch{}
+  try{await response.body?.cancel();}catch{}
  }
 
  return '';
 }
 
-async function productImageFromPage(
- sourceUrl
-){
- if(
-  !/^https?:\/\//.test(
-   sourceUrl||''
-  )
- ){
+async function productImageFromPage(sourceUrl){
+ if(!/^https?:\/\//.test(sourceUrl||'')){
   return '';
  }
 
- const response=
-  await fetchRemote(
-   sourceUrl,
-   {
-    method:'GET',
-    headers:{
-     Accept:'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8'
-    }
+ const response=await fetchRemote(
+  sourceUrl,
+  {
+   method:'GET',
+   headers:{
+    Accept:'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8'
    }
-  );
+  }
+ );
 
- if(
-  !response||
-  !response.ok
- ){
+ if(!response||!response.ok){
   return '';
  }
 
- const type=String(
-  response.headers.get(
-   'content-type'
-  )||''
- ).toLowerCase();
+ const type=String(response.headers.get('content-type')||'').toLowerCase();
 
- if(
-  !type.includes('text/html')&&
-  !type.includes('application/xhtml+xml')
- ){
-  try{
-   await response.body?.cancel();
-  }catch{}
-
+ if(!type.includes('text/html')&&!type.includes('application/xhtml+xml')){
+  try{await response.body?.cancel();}catch{}
   return '';
  }
 
- const html=
-  await limitedText(
-   response
-  );
+ const html=await limitedText(response);
 
- for(
-  const candidate
-  of pageImageCandidates(
-   html,
-   response.url||sourceUrl
-  )
- ){
-  const verified=
-   await verifiedImageUrl(
-    candidate
-   );
-
+ for(const candidate of pageImageCandidates(html,response.url||sourceUrl)){
+  const verified=await verifiedImageUrl(candidate);
   if(verified){
    return verified;
   }
@@ -895,204 +776,324 @@ async function productImageFromPage(
  return '';
 }
 
-function entityMatch(
- text='',
- entity=''
-){
- const compact=value=>
-  String(value)
-   .toLowerCase()
-   .replace(
-    /[\s\-_·•（）()【】\[\]]+/g,
-    ''
-   );
+function compactText(value=''){
+ return String(value)
+  .toLowerCase()
+  .replace(/[\s\-_·•（）()【】\[\]《》<>，,。.!！?？:：/\\]+/g,'');
+}
 
- const a=compact(text);
- const b=compact(entity);
+function entityMatch(text='',entity=''){
+ const a=compactText(text);
+ const b=compactText(entity);
 
  if(!a||!b){
   return false;
  }
 
- return a.includes(b)||
-  b.includes(a)||
-  (
-   b.length>=4&&
-   a.includes(
-    b.slice(0,4)
-   )
-  );
-}
-
-function mediaEvidenceUrls(
- item,
- plan
-){
- const entity=
-  item.entity||
-  item.title||
-  '';
-
- const urls=[];
-
- if(
-  /^https?:\/\//.test(
-   item.sourceUrl||''
-  )
- ){
-  urls.push(
-   item.sourceUrl
-  );
+ if(a.includes(b)||b.includes(a)){
+  return true;
  }
 
- for(
-  const fact
-  of plan?.sharedFacts||[]
- ){
+ const tokens=String(entity)
+  .toLowerCase()
+  .match(/[a-z]+\d*[a-z\d-]*|\d+[a-z]*|[\u4e00-\u9fff]{2,}/g)||[];
+
+ const useful=tokens
+  .map(compactText)
+  .filter(x=>x.length>=2);
+
+ return useful.length>=2&&
+  useful.filter(x=>a.includes(x)).length>=Math.min(2,useful.length);
+}
+
+function decodeDuckUrl(raw){
+ try{
+  const u=new URL(raw,'https://html.duckduckgo.com');
+  const target=u.searchParams.get('uddg');
+  return target?decodeURIComponent(target):u.href;
+ }catch{
+  return '';
+ }
+}
+
+async function searchHtml(url){
+ try{
+  const r=await fetch(url,{
+   method:'GET',
+   redirect:'follow',
+   signal:AbortSignal.timeout(10000),
+   headers:{
+    'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/145 Safari/537.36',
+    'Accept-Language':'zh-CN,zh;q=0.9,en;q=0.8',
+    Accept:'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8'
+   }
+  });
+
+  if(!r.ok){
+   return '';
+  }
+
+  return limitedText(r,1800000);
+ }catch{
+  return '';
+ }
+}
+
+function searchResultScore(result,entity){
+ const text=`${result.title||''} ${result.snippet||''} ${result.url||''}`;
+ let score=0;
+
+ if(entityMatch(text,entity))score+=10;
+ if(/官方|官网|official/i.test(text))score+=5;
+ if(/product|products|item|goods|detail|shop/i.test(result.url||''))score+=2;
+ if(/jd\.com|taobao\.com|tmall\.com|smzdm\.com|zhihu\.com|baike\.baidu\.com/i.test(result.url||''))score-=1;
+ if(/search|query|category/i.test(result.url||''))score-=2;
+
+ return score;
+}
+
+async function searchDuckDuckGo(entity){
+ const q=encodeURIComponent(`"${entity}" 官方 产品`);
+ const html=await searchHtml(`https://html.duckduckgo.com/html/?q=${q}`);
+ const out=[];
+ const re=/<a[^>]+class=["'][^"']*result__a[^"']*["'][^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+ let m;
+
+ while((m=re.exec(html))&&out.length<10){
+  const url=decodeDuckUrl(decodeHtml(m[1]));
+  const title=stripTags(m[2]);
+
+  if(!/^https?:\/\//.test(url))continue;
+  if(/duckduckgo\.com/i.test(new URL(url).hostname))continue;
+
+  out.push({url,title,snippet:'',engine:'duckduckgo'});
+ }
+
+ return out;
+}
+
+async function searchBing(entity){
+ const q=encodeURIComponent(`"${entity}" 官方 产品`);
+ const html=await searchHtml(`https://www.bing.com/search?q=${q}&count=10&setlang=zh-cn`);
+ const out=[];
+ const re=/<li[^>]+class=["'][^"']*b_algo[^"']*["'][\s\S]*?<h2[^>]*>\s*<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>[\s\S]*?<\/li>/gi;
+ let m;
+
+ while((m=re.exec(html))&&out.length<10){
+  const url=decodeHtml(m[1]);
+  const title=stripTags(m[2]);
+
+  if(!/^https?:\/\//.test(url))continue;
+  out.push({url,title,snippet:'',engine:'bing'});
+ }
+
+ return out;
+}
+
+async function searchProductSources(entity){
+ const all=[];
+
+ for(const fn of [searchDuckDuckGo,searchBing]){
+  try{
+   all.push(...await fn(entity));
+  }catch{}
+
+  if(all.length>=6){
+   break;
+  }
+ }
+
+ return all
+  .filter((x,i,a)=>a.findIndex(y=>y.url===x.url)===i)
+  .map(x=>({...x,score:searchResultScore(x,entity)}))
+  .filter(x=>x.score>=5)
+  .sort((a,b)=>b.score-a.score)
+  .slice(0,6);
+}
+
+async function searchBingImages(entity){
+ const q=encodeURIComponent(`${entity} 官方 产品图`);
+ const html=await searchHtml(`https://www.bing.com/images/search?q=${q}&form=HDRSC3&first=1&count=20`);
+ const out=[];
+ const re=/<a[^>]+class=["'][^"']*iusc[^"']*["'][^>]+m=["']([^"']+)["'][^>]*>/gi;
+ let m;
+
+ while((m=re.exec(html))&&out.length<8){
+  const encoded=decodeHtml(m[1]);
+  let data;
+
+  try{
+   data=JSON.parse(encoded);
+  }catch{
+   continue;
+  }
+
+  const imageUrl=data.murl||data.turl||'';
+  const sourceUrl=data.purl||'';
+
+  if(!/^https?:\/\//.test(imageUrl))continue;
+
+  out.push({
+   imageUrl,
+   sourceUrl:/^https?:\/\//.test(sourceUrl)?sourceUrl:'',
+   title:clean(data.t||data.desc||entity,120)
+  });
+ }
+
+ return out;
+}
+
+function proxyImageUrl(raw){
+ return `/api/image?url=${encodeURIComponent(raw)}`;
+}
+
+function mediaEvidenceUrls(item,plan){
+ const entity=item.entity||item.title||'';
+ const urls=[];
+
+ if(/^https?:\/\//.test(item.sourceUrl||'')){
+  urls.push(item.sourceUrl);
+ }
+
+ for(const fact of plan?.sharedFacts||[]){
   const relevant=
-   entityMatch(
-    fact.statement,
-    entity
-   )||
-   (fact.evidence||[])
-    .some(e=>
-     entityMatch(
-      `${e.title||''} ${e.snippet||''}`,
-      entity
-     )
-    );
+   entityMatch(fact.statement,entity)||
+   (fact.evidence||[]).some(e=>
+    entityMatch(`${e.title||''} ${e.snippet||''}`,entity)
+   );
 
   if(!relevant){
    continue;
   }
 
-  for(
-   const evidence
-   of fact.evidence||[]
-  ){
-   if(
-    /^https?:\/\//.test(
-     evidence.url||''
-    )
-   ){
-    urls.push(
-     evidence.url
-    );
+  for(const evidence of fact.evidence||[]){
+   if(/^https?:\/\//.test(evidence.url||'')){
+    urls.push(evidence.url);
    }
   }
  }
 
- return [
-  ...new Set(urls)
- ].slice(0,5);
+ return [...new Set(urls)].slice(0,5);
 }
 
-async function resolveProductMediaItem(
- item,
- plan
-){
- const entity=
-  clean(
-   item.entity||
-   item.title||
-   '',
-   80
-  );
+async function resolveProductMediaItem(item,plan){
+ const entity=clean(item.entity||item.title||'',80);
 
  if(!entity){
   return null;
  }
 
- const direct=
-  await verifiedImageUrl(
-   item.url
-  );
+ console.log(`[product-image] resolving: ${entity}`);
+
+ const direct=await verifiedImageUrl(item.url);
 
  if(direct){
+  console.log(`[product-image] direct image ok: ${entity}`);
   return{
    ...item,
    entity,
-   title:
-    item.title||entity,
-   url:direct,
-   source:
-    item.source||
-    '网页图片',
-   sourceUrl:
-    item.sourceUrl||
-    direct
+   title:item.title||entity,
+   url:proxyImageUrl(direct),
+   source:item.source||'网页图片',
+   sourceUrl:item.sourceUrl||direct
   };
  }
 
- const sourceUrls=
-  mediaEvidenceUrls(
-   item,
-   plan
-  );
+ const sourceUrls=mediaEvidenceUrls(item,plan);
 
- for(
-  const sourceUrl
-  of sourceUrls
- ){
-  const imageUrl=
-   await productImageFromPage(
-    sourceUrl
-   );
+ for(const sourceUrl of sourceUrls){
+  const imageUrl=await productImageFromPage(sourceUrl);
 
   if(!imageUrl){
    continue;
   }
 
-  let source=
-   item.source;
+  let source=item.source;
 
   if(!source){
-   try{
-    source=
-     new URL(
-      sourceUrl
-     ).hostname;
-   }catch{
-    source='产品来源页';
-   }
+   try{source=new URL(sourceUrl).hostname;}catch{source='产品来源页';}
   }
+
+  console.log(`[product-image] evidence page image ok: ${entity} <- ${sourceUrl}`);
 
   return{
    ...item,
    entity,
-   title:
-    item.title||entity,
-   url:imageUrl,
+   title:item.title||entity,
+   url:proxyImageUrl(imageUrl),
    source,
    sourceUrl
   };
  }
 
+ const searched=await searchProductSources(entity);
+
+ for(const result of searched){
+  const imageUrl=await productImageFromPage(result.url);
+
+  if(!imageUrl){
+   continue;
+  }
+
+  let source=result.title||'';
+  if(!source){
+   try{source=new URL(result.url).hostname;}catch{source='网页来源';}
+  }
+
+  console.log(`[product-image] search page image ok: ${entity} <- ${result.url}`);
+
+  return{
+   ...item,
+   entity,
+   title:item.title||entity,
+   url:proxyImageUrl(imageUrl),
+   source:clean(source,80),
+   sourceUrl:result.url
+  };
+ }
+
+ const imageResults=await searchBingImages(entity);
+
+ for(const result of imageResults){
+  const imageUrl=await verifiedImageUrl(result.imageUrl);
+
+  if(!imageUrl){
+   continue;
+  }
+
+  let source='图片搜索结果';
+
+  if(result.sourceUrl){
+   try{
+    source=new URL(result.sourceUrl).hostname;
+   }catch{}
+  }
+
+  console.log(`[product-image] image search fallback ok: ${entity}`);
+
+  return{
+   ...item,
+   entity,
+   title:item.title||entity,
+   url:proxyImageUrl(imageUrl),
+   source,
+   sourceUrl:result.sourceUrl||imageUrl
+  };
+ }
+
+ console.warn(`[product-image] no verified image found: ${entity}`);
+
  return null;
 }
 
-function productSeedsFromLinks(
- section
-){
+function productSeedsFromLinks(section){
  const seen=new Set();
  const out=[];
 
- for(
-  const link
-  of section.links||[]
- ){
-  const entity=
-   clean(
-    link.label||
-    link.query||
-    '',
-    80
-   );
+ for(const link of section.links||[]){
+  const entity=clean(link.label||link.query||'',80);
 
-  if(
-   !entity||
-   seen.has(entity)
-  ){
+  if(!entity||seen.has(entity)){
    continue;
   }
 
@@ -1105,111 +1106,61 @@ function productSeedsFromLinks(
    source:'',
    sourceUrl:'',
    entity,
-   factIds:
-    Array.isArray(
-     section.factIds
-    )
-     ? section.factIds
-     : []
+   factIds:Array.isArray(section.factIds)
+    ? section.factIds
+    : []
   });
  }
 
  return out.slice(0,4);
 }
 
-function isGenericCandidateLabel(
- value=''
-){
- const text=
-  clean(
-   value,
-   80
-  )
-   .toLowerCase();
+function isGenericCandidateLabel(value=''){
+ const text=clean(value,80).toLowerCase();
 
- if(
-  !text||
-  text.length<2||
-  text.length>50
- ){
+ if(!text||text.length<2||text.length>50){
   return true;
  }
 
- if(
-  /^[\d\s.%¥￥$+\-/×x~～]+$/i
-   .test(text)
- ){
+ if(/^[\d\s.%¥￥$+\-/×x~～]+$/i.test(text)){
   return true;
  }
 
- return /^(对比维度|对比项|参数|项目|指标|维度|产品|商品|品牌|型号|车型|候选|名称|方案|选项|定位|核心优势|主要短板|适用人群|风险与待核实参数|价格|售价|预算|尺寸|重量|续航|容量|噪音|功率|匹配度|推荐度)$/i
-  .test(text);
+ return /^(对比维度|对比项|参数|项目|指标|维度|产品|商品|品牌|型号|车型|候选|名称|方案|选项|定位|核心优势|主要短板|适用人群|风险与待核实参数|价格|售价|预算|尺寸|重量|续航|容量|噪音|功率|匹配度|推荐度)$/i.test(text);
 }
 
-function candidateLabelsFromSection(
- section
-){
+function candidateLabelsFromSection(section){
  if(
   !section||
-  ![
-   'comparison',
-   'table'
-  ].includes(
-   section.type
-  )||
-  !Array.isArray(
-   section.rows
-  )||
+  !['comparison','table'].includes(section.type)||
+  !Array.isArray(section.rows)||
   section.rows.length<2
  ){
   return [];
  }
 
- const rows=
-  section.rows;
+ const rows=section.rows;
+ const header=Array.isArray(rows[0])
+  ? rows[0]
+  : [];
 
- const header=
-  Array.isArray(
-   rows[0]
-  )
-   ? rows[0]
-   : [];
-
- if(
-  header.length<2
- ){
+ if(header.length<2){
   return [];
  }
 
- const first=
-  clean(
-   header[0]||'',
-   60
-  );
+ const first=clean(header[0]||'',60);
 
  const columnOriented=
   /对比|维度|项目|指标|参数|选项/i
    .test(first);
 
- if(
-  columnOriented
- ){
-  const labels=
-   header
-    .slice(1)
-    .map(
-     x=>
-      clean(
-       x,
-       80
-      )
-    )
-    .filter(
-     x=>
-      !isGenericCandidateLabel(
-       x
-      )
-    );
+ if(columnOriented){
+  const labels=header
+   .slice(1)
+   .map(x=>clean(x,80))
+   .filter(x=>
+    !isGenericCandidateLabel(x)
+   );
 
   if(
    labels.length>=2&&
@@ -1223,32 +1174,19 @@ function candidateLabelsFromSection(
   /产品|商品|品牌|型号|车型|候选|名称|方案|选项/i
    .test(first)
  ){
-  const labels=
-   rows
-    .slice(1)
-    .map(
-     r=>
-      Array.isArray(r)
-       ? clean(
-          r[0]||'',
-          80
-         )
-       : ''
-    )
-    .filter(
-     x=>
-      !isGenericCandidateLabel(
-       x
-      )
-    )
-    .slice(
-     0,
-     4
-    );
+  const labels=rows
+   .slice(1)
+   .map(r=>
+    Array.isArray(r)
+     ? clean(r[0]||'',80)
+     : ''
+   )
+   .filter(x=>
+    !isGenericCandidateLabel(x)
+   )
+   .slice(0,4);
 
-  if(
-   labels.length>=2
-  ){
+  if(labels.length>=2){
    return labels;
   }
  }
@@ -1256,24 +1194,17 @@ function candidateLabelsFromSection(
  return [];
 }
 
-function looksLikeProductTask(
- page,
- query=''
-){
+function looksLikeProductTask(page,query=''){
  const text=[
   query,
   page?.title,
   page?.subtitle,
   page?.summary,
-  ...(
-   page?.sections||
-   []
-  ).flatMap(
-   s=>[
+  ...(page?.sections||[])
+   .flatMap(s=>[
     s.heading,
     s.intro
-   ]
-  )
+   ])
  ]
   .filter(Boolean)
   .join(' ');
@@ -1282,142 +1213,87 @@ function looksLikeProductTask(
   .test(text);
 }
 
-function linksForCandidates(
- page,
- candidates
-){
+function linksForCandidates(page,candidates){
  const allLinks=
-  (
-   page?.sections||
-   []
-  )
-  .flatMap(
-   s=>
-    Array.isArray(s.links)
-     ? s.links
-     : []
-  );
+  (page?.sections||[])
+   .flatMap(
+    s=>
+     Array.isArray(s.links)
+      ? s.links
+      : []
+   );
 
  const out=[];
  const seen=new Set();
 
- for(
-  const candidate
-  of candidates
- ){
+ for(const candidate of candidates){
   const matched=
-   allLinks.filter(
-    link=>
-     entityMatch(
-      `${
-       link.label||
-       ''
-      } ${
-       link.query||
-       ''
-      }`,
-      candidate
-     )
+   allLinks.filter(link=>
+    entityMatch(
+     `${link.label||''} ${link.query||''}`,
+     candidate
+    )
    );
 
-  for(
-   const link
-   of matched
-  ){
+  for(const link of matched){
    const key=
-    `${
-     link.channel
-    }::${
-     link.query
-    }`;
+    `${link.channel}::${link.query}`;
 
-   if(
-    seen.has(key)
-   ){
+   if(seen.has(key)){
     continue;
    }
 
    seen.add(key);
 
    out.push({
-    label:
-     clean(
-      link.label||
-      candidate,
-      80
-     ),
-
-    query:
-     clean(
-      link.query||
-      candidate,
-      120
-     ),
-
+    label:clean(
+     link.label||candidate,
+     80
+    ),
+    query:clean(
+     link.query||candidate,
+     120
+    ),
     channel:
-     [
-      'official',
-      'jd',
-      'taobao'
-     ].includes(
-      link.channel
-     )
-      ? link.channel
-      : 'official'
+     ['official','jd','taobao']
+      .includes(link.channel)
+       ? link.channel
+       : 'official'
    });
   }
 
   const hasCandidate=
-   out.some(
-    link=>
-     entityMatch(
-      `${
-       link.label
-      } ${
-       link.query
-      }`,
-      candidate
-     )
+   out.some(link=>
+    entityMatch(
+     `${link.label} ${link.query}`,
+     candidate
+    )
    );
 
-  if(
-   !hasCandidate
-  ){
+  if(!hasCandidate){
    for(
     const channel
-    of [
-     'jd',
-     'taobao'
-    ]
+    of ['jd','taobao']
    ){
     const key=
      `${channel}::${candidate}`;
 
-    if(
-     seen.has(key)
-    ){
+    if(seen.has(key)){
      continue;
     }
 
     seen.add(key);
 
     out.push({
-     label:
-      candidate,
-
-     query:
-      candidate,
-
+     label:candidate,
+     query:candidate,
      channel
     });
    }
   }
  }
 
- return out.slice(
-  0,
-  9
- );
+ return out.slice(0,9);
 }
 
 function ensureProductImageSection(
@@ -1427,9 +1303,7 @@ function ensureProductImageSection(
 ){
  if(
   !page||
-  !Array.isArray(
-   page.sections
-  )||
+  !Array.isArray(page.sections)||
   !looksLikeProductTask(
    page,
    query
@@ -1443,8 +1317,7 @@ function ensureProductImageSection(
 
  for(
   let i=0;
-  i<
-  page.sections.length;
+  i<page.sections.length;
   i++
  ){
   const found=
@@ -1452,66 +1325,40 @@ function ensureProductImageSection(
     page.sections[i]
    );
 
-  if(
-   found.length>
-   candidates.length
-  ){
-   candidates=
-    found;
-
+  if(found.length>candidates.length){
+   candidates=found;
    sourceIndex=i;
   }
  }
 
- if(
-  candidates.length<2
- ){
+ if(candidates.length<2){
   return page;
  }
 
  const existing=
   page.sections.find(
-   s=>
-    s.type===
-    'product_image'
+   s=>s.type==='product_image'
   );
 
  const sourceSection=
-  page.sections[
-   sourceIndex
-  ]||{};
+  page.sections[sourceIndex]||{};
 
  const sharedFactIds=
-  Array.isArray(
-   sourceSection.factIds
-  )
-   ? sourceSection.factIds
-      .slice(
-       0,
-       12
-      )
+  Array.isArray(sourceSection.factIds)
+   ? sourceSection.factIds.slice(0,12)
    : [];
 
  const seeds=
   candidates.map(
    candidate=>({
     url:'',
-
-    title:
-     candidate,
-
+    title:candidate,
     caption:
      '候选产品图片仅用于快速识别与视觉参考，具体参数与价格以页面中的事实证据为准。',
-
     source:'',
-
     sourceUrl:'',
-
-    entity:
-     candidate,
-
-    factIds:
-     sharedFactIds
+    entity:candidate,
+    factIds:sharedFactIds
    })
   );
 
@@ -1523,28 +1370,20 @@ function ensureProductImageSection(
 
  if(existing){
   if(
-   !Array.isArray(
-    existing.media
-   )||
+   !Array.isArray(existing.media)||
    !existing.media.length
   ){
-   existing.media=
-    seeds;
+   existing.media=seeds;
   }
 
   if(
-   !Array.isArray(
-    existing.links
-   )||
+   !Array.isArray(existing.links)||
    !existing.links.length
   ){
-   existing.links=
-    links;
+   existing.links=links;
   }
 
-  if(
-   !existing.heading
-  ){
+  if(!existing.heading){
    existing.heading=
     '候选产品图文一览';
   }
@@ -1553,28 +1392,16 @@ function ensureProductImageSection(
  }
 
  const section={
-  type:
-   'product_image',
-
-  heading:
-   '候选产品图文一览',
-
+  type:'product_image',
+  heading:'候选产品图文一览',
   intro:
    '先通过产品图片快速建立识别，再结合下方参数、事实证据与风险项进行比较。图片仅用于视觉展示，不作为参数真实性证据。',
-
   items:[],
-
   rows:[],
-
   resultLabel:'',
-
-  factIds:
-   sharedFactIds,
-
+  factIds:sharedFactIds,
   links,
-
-  media:
-   seeds
+  media:seeds
  };
 
  let insertAt=
@@ -1583,14 +1410,11 @@ function ensureProductImageSection(
    sourceIndex
   );
 
- if(
-  page.sections.length>=8
- ){
+ if(page.sections.length>=8){
   let removeAt=-1;
 
   for(
-   let i=
-    page.sections.length-1;
+   let i=page.sections.length-1;
    i>=0;
    i--
   ){
@@ -1600,7 +1424,8 @@ function ensureProductImageSection(
      'narrative',
      'cards',
      'steps',
-     'checklist'
+     'checklist',
+     'timeline'
     ].includes(
      page.sections[i].type
     )
@@ -1610,18 +1435,20 @@ function ensureProductImageSection(
    }
   }
 
-  if(
-   removeAt>=0
-  ){
+  if(removeAt<0){
+   removeAt=
+    page.sections.findIndex(
+     (_,i)=>i!==sourceIndex
+    );
+  }
+
+  if(removeAt>=0){
    page.sections.splice(
     removeAt,
     1
    );
 
-   if(
-    removeAt<
-    insertAt
-   ){
+   if(removeAt<insertAt){
     insertAt--;
    }
   }
@@ -1648,21 +1475,13 @@ async function enrichProductMedia(
 ){
  if(
   !page||
-  !Array.isArray(
-   page.sections
-  )
+  !Array.isArray(page.sections)
  ){
   return page;
  }
 
- for(
-  const section
-  of page.sections
- ){
-  if(
-   section.type!==
-   'product_image'
-  ){
+ for(const section of page.sections){
+  if(section.type!=='product_image'){
    continue;
   }
 
@@ -1677,11 +1496,12 @@ async function enrichProductMedia(
    await Promise.all(
     seeds
      .slice(0,4)
-     .map(item=>
-      resolveProductMediaItem(
-       item,
-       plan
-      )
+     .map(
+      item=>
+       resolveProductMediaItem(
+        item,
+        plan
+       )
      )
    );
 
@@ -1877,10 +1697,11 @@ function parsePage(o){
  }
 
  for(const s of p.sections){
-  s.media=normalizeMedia(
-   s.media,
-   s.type==='product_image'
-  );
+  s.media=
+   normalizeMedia(
+    s.media,
+    s.type==='product_image'
+   );
 
   s.formula=
    ['sum','product']
@@ -2411,10 +2232,10 @@ async function requestModel(
 }
 
 const planPrompt=
- '理解用户真正要完成的任务，提取全部硬约束，并规划恰好七种呈现同一份最终答案的网页形态。七种形态依次对应 hand、terminal、magazine、ice、minimal、app、neon；它们只改变叙事顺序、视觉重点与交互方式，不得改变事实、计算、候选项或最终结论。sharedFacts 是统一事实账本：用户内容标 user/provided，无法核实的外部信息标 fact/unverified，假设标 assumption/unverified，计算标 calculation/provided；只有能由搜索引用元数据支撑的外部事实才允许最终升级为 verified；不得伪造来源、价格、库存、参数或商品详情 URL。每个形态给出适合的阅读场景、重点、相同交付目标、3至6节统一内容大纲与有效组件。当任务涉及商品推荐、产品选型、品牌型号对比时，必须把 product_image 作为建议组件之一，让最终页面可以展示候选产品实物图；普通图片分析不要求展示原图。严格限制文字，中文，不追问。';
+ '理解用户真正要完成的任务，提取全部硬约束，并规划恰好七种呈现同一份最终答案的网页形态。七种形态依次对应 hand、terminal、magazine、ice、minimal、app、neon；它们只改变叙事顺序、视觉重点与交互方式，不得改变事实、计算、候选项或最终结论。sharedFacts 是统一事实账本：用户内容标 user/provided，无法核实的外部信息标 fact/unverified，假设标 assumption/unverified，计算标 calculation/provided；只有能由搜索引用元数据直接支撑的外部事实才允许最终升级为 verified；不得伪造来源、价格、库存、参数或商品详情 URL。每个形态给出适合的阅读场景、重点、相同交付目标、3至6节统一内容大纲与有效组件。当任务涉及商品推荐、产品选型、品牌型号对比时，把 product_image 作为建议组件之一。普通上传图片主要用于理解，不默认要求把原图展示出来。严格限制文字，中文，不追问。';
 
 const pagePrompt=
- '生成一份真正完成用户任务的统一内容结果，之后会被七种界面共同渲染。必须保留全部约束，先给关键判断，再展示思考路径、可比较的信息、可执行步骤与最终选择。若任务涉及购买、品牌、产品选型或商品对比：至少列出3个不同品牌或候选项，分别写清适用人群、关键区别、风险和待核实参数；必须生成至少一个type=product_image的section，位置尽量靠近推荐结论或对比表。product_image的media必须为每个主要候选商品保留一条记录，entity和title必须写具体品牌+型号，caption写一句与用户需求直接相关的推荐理由；如果搜索能够核实产品官网页、品牌页或可信商品页，把该页面填入sourceUrl并写明source。直接图片URL只有在确认是真实可访问图片时才填写url；如果不能确认图片直链，url必须返回空字符串，不得编造，后端会根据sourceUrl继续解析产品图。product_image这个section自己的links中也必须为每个候选项给出对应搜索入口，label写候选名称，query写完整品牌型号关键词，channel在official、jd、taobao中选择，每个候选至少覆盖京东或淘宝，整个section至少同时覆盖京东和淘宝。系统会安全生成站内搜索链接，不得编造商品详情URL。当存在用户上传的原始图片时，必须重新直接观察图片，不得只依赖originalQuery或sharedFacts。优先识别图片中明显可见的主体对象、动物、家具、设备、文字、空间结构、布局和颜色；若sharedFacts遗漏了明显视觉信息，应根据原图补充；看不清或无法确认的细节必须标注“图片信息待核实”，禁止臆测。普通图片主要作为理解输入，除非用户明确要求展示原图，否则不要为了展示用户上传图片而使用image组件。image_gallery用于明确需要多图展示的任务。除product_image外，media里只能填写真实可访问的图片URL；所有media记录都必须带title、caption、source、sourceUrl、entity和factIds。所有外部事实必须来自sharedFacts；无法核实的参数或价格明确写待核实，不得伪造来源或精确数据。图片只用于视觉展示，不得把图片本身当作参数事实证据。内容要具体。calculator用rows表示输入字段，第一行固定为[名称,初值,最小值,最大值,步长,单位]；items第一项只用sum或product。comparison/table/barChart使用rows且第一行表头，barChart第二列为数字。checklist/timeline/steps/cards用items。未使用字段返回空数组。用中文。';
+ '生成一份真正完成用户任务的统一内容结果，之后会被七种界面共同渲染。必须保留全部约束，先给关键判断，再展示思考路径、可比较的信息、可执行步骤与最终选择。若任务涉及购买、品牌、产品选型或商品对比：至少列出3个不同品牌或候选项，分别写清适用人群、关键区别、风险和待核实参数；优先生成type=product_image的section，位置靠近推荐结论或对比表。product_image的media为每个主要候选商品保留一条记录，entity和title写具体品牌+型号，caption写一句与需求相关的推荐理由；如果能核实官网页、品牌页或可信商品页，把页面写入sourceUrl并写明source。直接图片URL只有确认是真实可访问图片时才填写url；无法确认时url返回空字符串，不得编造，后端会继续主动搜索产品页和产品图。product_image的links中为候选项给出搜索入口，label写候选名称，query写完整品牌型号关键词，channel在official、jd、taobao中选择。系统会安全生成站内搜索链接，不得编造商品详情URL。当存在用户上传的原始图片时，必须重新直接观察图片，不得只依赖originalQuery或sharedFacts；明显可见的主体、动物、家具、设备、文字、布局、颜色和空间信息应纳入结果；看不清或无法确认的细节标“图片信息待核实”，禁止臆测。普通上传图片主要作为理解输入，除非用户明确要求展示原图，否则不要为了展示上传图片而使用image组件。image_gallery用于明确需要多图展示的任务。除product_image外，media里只能填写真实可访问的图片URL；所有media记录都必须带title、caption、source、sourceUrl、entity和factIds。所有外部事实必须来自sharedFacts；无法核实的参数或价格明确写待核实，不得伪造来源或精确数据。图片只用于视觉展示，不得把图片本身当作参数事实证据。内容要具体。calculator用rows表示输入字段，第一行固定为[名称,初值,最小值,最大值,步长,单位]；items第一项只用sum或product。comparison/table/barChart使用rows且第一行表头，barChart第二列为数字。checklist/timeline/steps/cards用items。未使用字段返回空数组。用中文。';
 
 const planQuery=
  (q,images=[])=>requestModel(
@@ -2430,12 +2251,9 @@ const generatePage=
  (q,p,images=[])=>requestModel(
   JSON.stringify({
    originalQuery:q,
-   sharedConstraints:
-    p.constraints,
-   sharedFacts:
-    p.sharedFacts,
-   contentOutline:
-    p.variants[0].outline,
+   sharedConstraints:p.constraints,
+   sharedFacts:p.sharedFacts,
+   contentOutline:p.variants[0].outline,
    suggestedComponents:[
     ...new Set(
      p.variants.flatMap(
@@ -2445,7 +2263,7 @@ const generatePage=
    ],
    imageContext:
     images.length
-     ? '用户本次上传了原始参考图片。请在生成最终页面时重新直接观察图片，并将明显可见的主体、动物、家具、设备、文字、布局、颜色和空间信息纳入结果；不要只依赖sharedFacts。'
+     ? '用户本次上传了原始参考图片。请在生成最终页面时重新直接观察图片，并将明显可见信息纳入结果；不要只依赖sharedFacts。'
      : ''
   }),
   pagePrompt,
@@ -2644,6 +2462,182 @@ function createServer(){
 
    if(
     req.method==='GET'&&
+    route==='/api/image'
+   ){
+    let target='';
+
+    try{
+     const requestUrl=
+      new URL(
+       req.url,
+       'http://localhost'
+      );
+
+     target=
+      requestUrl.searchParams
+       .get('url')||
+      '';
+    }catch{}
+
+    if(
+     !target||
+     !/^https?:\/\//.test(target)
+    ){
+     res.writeHead(
+      400,
+      {
+       'Content-Type':
+        'text/plain; charset=utf-8'
+      }
+     );
+
+     return res.end(
+      'Invalid image URL'
+     );
+    }
+
+    (async()=>{
+     const remote=
+      await fetchRemote(
+       target,
+       {
+        method:'GET',
+        headers:{
+         Accept:
+          'image/avif,image/webp,image/apng,image/*,*/*;q=0.8'
+        }
+       }
+      );
+
+     if(
+      !remote||
+      !remote.ok
+     ){
+      res.writeHead(
+       404,
+       {
+        'Content-Type':
+         'text/plain; charset=utf-8'
+       }
+      );
+
+      return res.end(
+       'Image not found'
+      );
+     }
+
+     const type=
+      String(
+       remote.headers
+        .get('content-type')||
+       ''
+      )
+      .toLowerCase();
+
+     if(!type.startsWith('image/')){
+      try{
+       await remote.body?.cancel();
+      }catch{}
+
+      res.writeHead(
+       415,
+       {
+        'Content-Type':
+         'text/plain; charset=utf-8'
+       }
+      );
+
+      return res.end(
+       'Not an image'
+      );
+     }
+
+     const contentLength=
+      Number(
+       remote.headers
+        .get('content-length')||
+       0
+      );
+
+     if(
+      contentLength>
+      6*1024*1024
+     ){
+      try{
+       await remote.body?.cancel();
+      }catch{}
+
+      res.writeHead(
+       413,
+       {
+        'Content-Type':
+         'text/plain; charset=utf-8'
+       }
+      );
+
+      return res.end(
+       'Image too large'
+      );
+     }
+
+     const data=
+      await limitedBuffer(
+       remote
+      );
+
+     if(!data){
+      res.writeHead(
+       413,
+       {
+        'Content-Type':
+         'text/plain; charset=utf-8'
+       }
+      );
+
+      return res.end(
+       'Image too large'
+      );
+     }
+
+     res.writeHead(
+      200,
+      {
+       'Content-Type':
+        type.split(';')[0],
+       'Cache-Control':
+        'public, max-age=21600',
+       'X-Content-Type-Options':
+        'nosniff'
+      }
+     );
+
+     return res.end(data);
+    })().catch(error=>{
+     console.error(
+      '[image-proxy]',
+      error
+     );
+
+     if(!res.headersSent){
+      res.writeHead(
+       502,
+       {
+        'Content-Type':
+         'text/plain; charset=utf-8'
+       }
+      );
+     }
+
+     res.end(
+      'Image proxy failed'
+     );
+    });
+
+    return;
+   }
+
+   if(
+    req.method==='GET'&&
     route==='/api/health'
    ){
     return send(
@@ -2803,8 +2797,13 @@ function createServer(){
           ? payload.query.trim()
           : '';
 
+        const preparedImages=
+         imageParts(
+          payload.images
+         );
+
         const hasImages=
-         imageParts(payload.images).length>0;
+         preparedImages.length>0;
 
         if(
          (!textQuery&&!hasImages)||
@@ -2827,7 +2826,7 @@ function createServer(){
         const plan=
          await planQuery(
           effectiveQuery,
-          payload.images
+          preparedImages
          );
 
         prune();
@@ -2838,11 +2837,15 @@ function createServer(){
         sessions.set(
          id,
          {
-          query:effectiveQuery,
+          query:
+           effectiveQuery,
           plan,
-          images:imageParts(payload.images),
-          pages:new Map(),
-          created:Date.now()
+          images:
+           preparedImages,
+          pages:
+           new Map(),
+          created:
+           Date.now()
          }
         );
 
@@ -2969,17 +2972,22 @@ function createServer(){
         );
        }
 
+       const preparedImages=
+        imageParts(
+         payload.images
+        );
+
        const plan=
         await planQuery(
          payload.query.trim(),
-         payload.images
+         preparedImages
         );
 
        const page=
         await generatePage(
          payload.query.trim(),
          plan,
-         imageParts(payload.images)
+         preparedImages
         );
 
        const withProductSection=
