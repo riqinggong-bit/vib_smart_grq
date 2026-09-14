@@ -4106,3 +4106,48 @@ tbody tr[data-choice]:focus{
       40px;
   }
 }
+
+/* =========================================================
+   START · IMAGE UPLOAD CONTROL
+   Hide the native file-name UI and use our own image list.
+========================================================= */
+.media-upload-row{
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:10px;
+  margin-bottom:12px;
+}
+
+.media-upload-row>span{
+  color:#aaa6b7;
+  font:12px monospace;
+}
+
+.query-panel .upload-button{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:auto;
+  margin:0;
+  padding:9px 14px;
+  border:1px solid #4b475e;
+  border-radius:8px;
+  background:#252337;
+  color:#f5f3fa;
+  font:700 13px/1.2 Inter,Arial,"Microsoft YaHei",sans-serif;
+  cursor:pointer;
+  transition:.2s ease;
+}
+
+.query-panel .upload-button:hover,
+.query-panel .upload-button:focus-visible{
+  border-color:#ff684b;
+  background:#302d43;
+  outline:none;
+}
+
+#reference-images[hidden]{
+  display:none!important;
+}
+

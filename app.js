@@ -23,6 +23,7 @@ const clip=(v,n)=>{
 };
 
 const imageFiles=[];
+let uploadedMedia=[];
 let plan,page,query='',active=-1,busy=false,checks=new Set();
 
 const pages=new Map();
@@ -704,6 +705,103 @@ function mediaBlock(s){
       }
     </div>
   `;
+}
+
+function uploadedMediaBlock(){
+  if(!uploadedMedia.length){
+    return '';
+  }
+
+  const notes=
+    $('#image-notes')
+      ?.value
+      ?.trim();
+
+  return `
+    <section class="uploaded-media-block">
+      <div>
+        <small>
+          UPLOADED REFERENCE
+        </small>
+
+        <h2>
+          上传参考图
+        </h2>
+
+        ${
+          notes
+            ? `<p>${esc(notes)}</p>`
+            : '<p>AI 已读取这些图片内容，并将可见文字、空间、物体和布局纳入分析。</p>'
+        }
+      </div>
+
+      <div class="uploaded-media-grid">
+        ${
+          uploadedMedia.map(m=>`
+            <figure>
+              <img
+                src="${esc(m.url)}"
+                alt="${esc(m.name)}"
+                loading="lazy"
+              >
+
+              <figcaption>
+                ${esc(m.name)}
+              </figcaption>
+            </figure>
+          `).join('')
+        }
+      </div>
+    </section>
+  `;
+}
+
+function injectUploadedMedia(){
+  const html=
+    uploadedMediaBlock();
+
+  if(!html){
+    return;
+  }
+
+  const main=
+    $('#result main');
+
+  if(!main){
+    return;
+  }
+
+  const holder=
+    document.createElement('div');
+
+  holder.innerHTML=html;
+
+  const block=
+    holder.firstElementChild;
+
+  const anchor=
+    main.querySelector(
+      '.hand-summary,'+
+      '.terminal-main,'+
+      '.magazine-feature,'+
+      '.ice-hero,'+
+      '.minimal-answer,'+
+      '.app-main,'+
+      '.neon-main'
+    );
+
+  if(anchor){
+    anchor.insertAdjacentElement(
+      'afterend',
+      block
+    );
+    return;
+  }
+
+  main.insertBefore(
+    block,
+    main.children[1]||null
+  );
 }
 
 function section(s,n){
@@ -2987,6 +3085,8 @@ function show(){
       v
     );
 
+  injectUploadedMedia();
+
   bindResultEvents();
 
   go('result');
@@ -3169,6 +3269,7 @@ function reset(){
   pages.clear();
   checksets.clear();
   controls.clear();
+  uploadedMedia=[];
 
   $('#query').value='';
   $('#image-notes').value='';
@@ -3336,7 +3437,8 @@ function compressImage(file){
       resolve({
         name:file.name,
         mimeType:dataUrl.slice(5,dataUrl.indexOf(';')),
-        data:dataUrl.split(',')[1]
+        data:dataUrl.split(',')[1],
+        url:dataUrl
       });
     };
 
@@ -3373,7 +3475,8 @@ function readImageFile(file){
             .slice(5,dataUrl.indexOf(';'))||
           file.type||
           'image/png',
-        data:dataUrl.split(',')[1]
+        data:dataUrl.split(',')[1],
+        url:dataUrl
       });
     };
 
@@ -3415,6 +3518,8 @@ $('#query-form').onsubmit=
       buildQuery();
 
     if(!q){
+      $('#error').textContent=
+        '请输入需求，或上传至少一张参考图片。';
       return;
     }
 
@@ -3434,6 +3539,12 @@ $('#query-form').onsubmit=
     try{
       const images=
         await buildImages();
+
+      uploadedMedia=
+        images.map(x=>({
+          name:x.name,
+          url:x.url
+        }));
 
       const r=
         await fetch(
