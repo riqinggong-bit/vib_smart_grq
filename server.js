@@ -1069,7 +1069,7 @@ async function verifyDisplayMedia(page,enabled){
 
 
 async function commonsImage(entity){
- const endpoint='https://commons.wikimedia.org/w/api.php?'+new URLSearchParams({action:'query',generator:'search',gsrsearch:`${entity} product`,gsrnamespace:'6',gsrlimit:'3',prop:'imageinfo',iiprop:'url|mime',iiurlwidth:'900',format:'json',origin:'*'});
+ const endpoint='https://commons.wikimedia.org/w/api.php?'+new URLSearchParams({action:'query',generator:'search',gsrsearch:entity,gsrnamespace:'6',gsrlimit:'5',prop:'imageinfo',iiprop:'url|mime',iiurlwidth:'720',format:'json',origin:'*'});
  const response=await fetch(endpoint,{signal:AbortSignal.timeout(10000),headers:{Accept:'application/json'}});
  if(!response.ok)return null;
  const data=await response.json();
@@ -1087,19 +1087,51 @@ async function commonsImage(entity){
 }
 
 
+async function wikipediaImage(entity,language){
+ const endpoint=`https://${language}.wikipedia.org/w/api.php?`+new URLSearchParams({action:'query',generator:'search',gsrsearch:entity,gsrlimit:'3',prop:'pageimages|info',piprop:'thumbnail',pithumbsize:'720',inprop:'url',format:'json',origin:'*'});
+ const response=await fetch(endpoint,{signal:AbortSignal.timeout(10000),headers:{Accept:'application/json'}});
+ if(!response.ok)return null;
+ const data=await response.json();
+ const pages=Object.values(data.query?.pages||{}).sort((a,b)=>(a.index||99)-(b.index||99));
+ for(const item of pages){
+  const url=item.thumbnail?.source;
+  if(!url)continue;
+  try{
+   const checked=await fetchImageUrl(url);
+   return{url:checked.sourceUrl,title:entity,caption:`${entity} 的百科条目参考图片，具体版本与型号以来源页面为准。`,source:language==='zh'?'中文维基百科':'Wikipedia',sourceUrl:item.fullurl||`https://${language}.wikipedia.org/`,entity,factIds:[]};
+  }catch{}
+ }
+ return null;
+}
+
+
+async function referenceImage(entity){
+ return await wikipediaImage(entity,'zh')||
+  await wikipediaImage(entity,'en')||
+  await commonsImage(entity);
+}
+
+
 async function addDisplayMediaFallback(page,enabled){
- if(!enabled||page.sections.some(section=>section.media.length))return page;
- const entities=[...new Set(page.sections.flatMap(section=>section.links.map(link=>link.label)))].filter(Boolean).slice(0,3);
+ if(!enabled)return page;
+ const entities=[...new Set(page.sections.flatMap(section=>section.links.map(link=>link.label)))].filter(Boolean).slice(0,4);
+ const imageSections=page.sections.filter(section=>['image','image_gallery','product_image'].includes(section.type));
+ const existing=imageSections.flatMap(section=>section.media);
+ const existingNames=new Set(existing.map(item=>String(item.entity||item.title).toLowerCase()));
  const media=[];
  for(const entity of entities){
+  if(existingNames.has(String(entity).toLowerCase()))continue;
   try{
-   const item=await commonsImage(entity);
+   const item=await referenceImage(entity);
    if(item)media.push(item);
   }catch{}
  }
  if(!media.length)return page;
- const section={type:'product_image',heading:'品牌与竞品图片',intro:'以下为经过访问校验的公开参考图片；产品版本与型号请以来源页面为准。',items:[],rows:[],resultLabel:'',factIds:[],links:[],media};
- if(page.sections.length<8)page.sections.push(section);
+ if(imageSections.length){
+  imageSections[0].media=[...imageSections[0].media,...media].slice(0,6);
+ }else{
+  page.sections.push({type:'product_image',heading:'品牌与竞品图片',intro:'以下为经过访问校验的公开参考图片；产品版本与型号请以来源页面为准。',items:[],rows:[],resultLabel:'',factIds:[],links:[],media});
+ }
  return page;
 }
 
@@ -3220,6 +3252,8 @@ module.exports={
  imageUrlsToParts,
  imageDisplayRequested,
  verifyDisplayMedia,
+ referenceImage,
+ addDisplayMediaFallback,
  isPrivateAddress,
  resolveQueryImages
 };
