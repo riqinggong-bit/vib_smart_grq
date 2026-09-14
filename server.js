@@ -1,194 +1,45 @@
 const http=require('http'),fs=require('fs'),path=require('path'),crypto=require('crypto'),dns=require('dns').promises,net=require('net');
+const root=__dirname;if(fs.existsSync(path.join(root,'.env')))process.loadEnvFile(path.join(root,'.env'));
+const model=process.env.GEMINI_MODEL||process.env.OPENAI_MODEL||'gpt-4.1-mini',isGemini=model.startsWith('gemini-');
+const apiKey=()=>isGemini?(process.env.GEMINI_API_KEY||process.env.OPENAI_API_KEY):process.env.OPENAI_API_KEY;
+const geminiBase=(process.env.GEMINI_BASE_URL||'https://generativelanguage.googleapis.com').replace(/\/+$/,'');
+const geminiGrounding=process.env.GEMINI_ENABLE_GROUNDING==='true'||(!process.env.GEMINI_BASE_URL&&process.env.GEMINI_ENABLE_GROUNDING!=='false');
+const isCloseAI=isGemini&&/openai-proxy\.org/.test(geminiBase);
+const closeAIBase=(process.env.CLOSEAI_BASE_URL||'https://api.openai-proxy.org/v1').replace(/\/+$/,'');
+const requestLimit=Math.max(1,Number(process.env.REQUESTS_PER_HOUR)||30),rateWindow=60*60*1000,requestLog=new Map();
 
-const root=__dirname;
-
-if(
- fs.existsSync(
-  path.join(root,'.env')
- )
-){
- process.loadEnvFile(
-  path.join(root,'.env')
- );
-}
-
-const model=
- process.env.GEMINI_MODEL||
- process.env.OPENAI_MODEL||
- 'gpt-4.1-mini';
-
-const isGemini=
- model.startsWith('gemini-');
-
-const apiKey=()=>
- isGemini
-  ? (
-     process.env.GEMINI_API_KEY||
-     process.env.OPENAI_API_KEY
-    )
-  : process.env.OPENAI_API_KEY;
-
-const geminiBase=
- (
-  process.env.GEMINI_BASE_URL||
-  'https://generativelanguage.googleapis.com'
- )
- .replace(/\/+$/,'');
-
-const geminiGrounding=
- process.env.GEMINI_ENABLE_GROUNDING==='true'||
- (
-  !process.env.GEMINI_BASE_URL&&
-  process.env.GEMINI_ENABLE_GROUNDING!=='false'
- );
-
-const isCloseAI=
- isGemini&&
- /openai-proxy\.org/.test(
-  geminiBase
- );
-
-const closeAIBase=
- (
-  process.env.CLOSEAI_BASE_URL||
-  'https://api.openai-proxy.org/v1'
- )
- .replace(/\/+$/,'');
-
-const requestLimit=
- Math.max(
-  1,
-  Number(
-   process.env.REQUESTS_PER_HOUR
-  )||30
- );
-
-const rateWindow=
- 60*60*1000;
-
-const requestLog=
- new Map();
-
-
-const layouts=[
- 'hand',
- 'terminal',
- 'magazine',
- 'ice',
- 'minimal',
- 'app',
- 'neon'
-];
-
-const types=[
- 'narrative',
- 'steps',
- 'cards',
- 'table',
- 'checklist',
- 'timeline',
- 'comparison',
- 'calculator',
- 'barChart',
- 'image',
- 'image_gallery',
- 'product_image'
-];
-
+const layouts=['hand','terminal','magazine','ice','minimal','app','neon'];
+const types=['narrative','steps','cards','table','checklist','timeline','comparison','calculator','barChart','image','image_gallery','product_image'];
 
 const factSchema={
  type:'object',
-
  additionalProperties:false,
-
- required:[
-  'id',
-  'statement',
-  'kind',
-  'status',
-  'source'
- ],
-
+ required:['id','statement','kind','status','source'],
  properties:{
-  id:{
-   type:'string'
-  },
-
-  statement:{
-   type:'string'
-  },
-
-  kind:{
-   type:'string',
-   enum:[
-    'user',
-    'fact',
-    'assumption',
-    'calculation'
-   ]
-  },
-
-  status:{
-   type:'string',
-   enum:[
-    'provided',
-    'verified',
-    'unverified'
-   ]
-  },
-
-  source:{
-   type:'string'
-  }
+  id:{type:'string'},
+  statement:{type:'string'},
+  kind:{type:'string',enum:['user','fact','assumption','calculation']},
+  status:{type:'string',enum:['provided','verified','unverified']},
+  source:{type:'string'}
  }
 };
 
-
 const planSchema={
  type:'object',
-
  additionalProperties:false,
-
- required:[
-  'title',
-  'taskType',
-  'constraints',
-  'sharedFacts',
-  'variants'
- ],
-
+ required:['title','taskType','constraints','sharedFacts','variants'],
  properties:{
-  title:{
-   type:'string'
-  },
-
-  taskType:{
-   type:'string'
-  },
-
-  constraints:{
-   type:'array',
-   items:{
-    type:'string'
-   }
-  },
-
-  sharedFacts:{
-   type:'array',
-   items:factSchema
-  },
-
+  title:{type:'string'},
+  taskType:{type:'string'},
+  constraints:{type:'array',items:{type:'string'}},
+  sharedFacts:{type:'array',items:factSchema},
   variants:{
    type:'array',
-
    minItems:7,
    maxItems:7,
-
    items:{
     type:'object',
-
     additionalProperties:false,
-
     required:[
      'title',
      'audience',
@@ -198,43 +49,25 @@ const planSchema={
      'layout',
      'components'
     ],
-
     properties:{
-     title:{
-      type:'string'
-     },
-
-     audience:{
-      type:'string'
-     },
-
-     focus:{
-      type:'string'
-     },
-
-     outcome:{
-      type:'string'
-     },
-
+     title:{type:'string'},
+     audience:{type:'string'},
+     focus:{type:'string'},
+     outcome:{type:'string'},
      outline:{
       type:'array',
       minItems:3,
       maxItems:6,
-      items:{
-       type:'string'
-      }
+      items:{type:'string'}
      },
-
      layout:{
       type:'string',
       enum:layouts
      },
-
      components:{
       type:'array',
       minItems:1,
       maxItems:4,
-
       items:{
        type:'string',
        enum:types
@@ -246,43 +79,21 @@ const planSchema={
  }
 };
 
-
 const pageSchema={
  type:'object',
-
  additionalProperties:false,
-
- required:[
-  'title',
-  'subtitle',
-  'summary',
-  'sections'
- ],
-
+ required:['title','subtitle','summary','sections'],
  properties:{
-  title:{
-   type:'string'
-  },
-
-  subtitle:{
-   type:'string'
-  },
-
-  summary:{
-   type:'string'
-  },
-
+  title:{type:'string'},
+  subtitle:{type:'string'},
+  summary:{type:'string'},
   sections:{
    type:'array',
-
    minItems:3,
    maxItems:8,
-
    items:{
     type:'object',
-
     additionalProperties:false,
-
     required:[
      'type',
      'heading',
@@ -294,100 +105,52 @@ const pageSchema={
      'links',
      'media'
     ],
-
     properties:{
      type:{
       type:'string',
       enum:types
      },
-
-     heading:{
-      type:'string'
-     },
-
-     intro:{
-      type:'string'
-     },
-
+     heading:{type:'string'},
+     intro:{type:'string'},
      items:{
       type:'array',
-      items:{
-       type:'string'
-      }
+      items:{type:'string'}
      },
-
      rows:{
       type:'array',
-
       items:{
        type:'array',
-
-       items:{
-        type:'string'
-       }
+       items:{type:'string'}
       }
      },
-
-     resultLabel:{
-      type:'string'
-     },
-
+     resultLabel:{type:'string'},
      factIds:{
       type:'array',
-
-      items:{
-       type:'string'
-      }
+      items:{type:'string'}
      },
-
      links:{
       type:'array',
-
       maxItems:9,
-
       items:{
        type:'object',
-
        additionalProperties:false,
-
-       required:[
-        'label',
-        'query',
-        'channel'
-       ],
-
+       required:['label','query','channel'],
        properties:{
-        label:{
-         type:'string'
-        },
-
-        query:{
-         type:'string'
-        },
-
+        label:{type:'string'},
+        query:{type:'string'},
         channel:{
          type:'string',
-
-         enum:[
-          'official',
-          'jd',
-          'taobao'
-         ]
+         enum:['official','jd','taobao']
         }
        }
       }
      },
-
      media:{
       type:'array',
-
       maxItems:12,
-
       items:{
        type:'object',
-
        additionalProperties:false,
-
        required:[
         'url',
         'title',
@@ -397,38 +160,16 @@ const pageSchema={
         'entity',
         'factIds'
        ],
-
        properties:{
-        url:{
-         type:'string'
-        },
-
-        title:{
-         type:'string'
-        },
-
-        caption:{
-         type:'string'
-        },
-
-        source:{
-         type:'string'
-        },
-
-        sourceUrl:{
-         type:'string'
-        },
-
-        entity:{
-         type:'string'
-        },
-
+        url:{type:'string'},
+        title:{type:'string'},
+        caption:{type:'string'},
+        source:{type:'string'},
+        sourceUrl:{type:'string'},
+        entity:{type:'string'},
         factIds:{
          type:'array',
-
-         items:{
-          type:'string'
-         }
+         items:{type:'string'}
         }
        }
       }
@@ -439,864 +180,1576 @@ const pageSchema={
  }
 };
 
-
 function textOf(o){
-
- if(
-  o.status&&
-  o.status!=='completed'
- ){
-  throw Error(
-   '模型未完成生成，请重试。'
-  );
+ if(o.status&&o.status!=='completed'){
+  throw Error('模型未完成生成，请重试。');
  }
 
- const c=
-  (o.output||[])
-   .filter(
-    x=>
-     x.type==='message'
-   )
-   .flatMap(
-    x=>
-     x.content||[]
-   );
+ const c=(o.output||[])
+  .filter(x=>x.type==='message')
+  .flatMap(x=>x.content||[]);
 
- if(
-  c.some(
-   x=>
-    x.type==='refusal'
-  )
- ){
-  throw Error(
-   '模型无法处理这条需求。'
-  );
+ if(c.some(x=>x.type==='refusal')){
+  throw Error('模型无法处理这条需求。');
  }
 
  return c
-  .filter(
-   x=>
-    x.type==='output_text'
-  )
-  .map(
-   x=>
-    x.text
-  )
+  .filter(x=>x.type==='output_text')
+  .map(x=>x.text)
   .join('');
 }
 
-
-function jsonOf(
- o,
- label
-){
-
+function jsonOf(o,label){
  try{
-
-  return JSON.parse(
-   textOf(o)
-  );
-
+  return JSON.parse(textOf(o));
  }catch{
-
-  throw Error(
-   `${label}格式无效，请重试。`
-  );
-
+  throw Error(`${label}格式无效，请重试。`);
  }
 }
 
+function clean(value,max){
+ let text=String(value||'')
+  .replace(/\s+/g,' ')
+  .trim();
 
-function clean(
- value,
- max
-){
-
- let text=
-  String(value||'')
-   .replace(
-    /\s+/g,
-    ' '
-   )
-   .trim();
-
- const whole=
-  text.match(
-   /^(.{1,12})\1{2,}$/
-  );
+ const whole=text.match(/^(.{1,12})\1{2,}$/);
 
  if(whole){
   text=whole[1];
  }
 
- text=
-  text.replace(
-   /(.{2,6})\1{3,}/g,
-   '$1'
-  );
+ text=text.replace(/(.{2,6})\1{3,}/g,'$1');
 
- return text.slice(
-  0,
-  max
- );
+ return text.slice(0,max);
 }
 
+function sourceType(title='',url=''){
+ const host=String(url).toLowerCase();
+ const name=String(title).toLowerCase();
 
-function sourceType(
- title='',
- url=''
-){
-
- const host=
-  String(url)
-   .toLowerCase();
-
- const name=
-  String(title)
-   .toLowerCase();
-
- if(
-  /gov|edu|官方|旗舰店|alpicool|tesla|apple/
-   .test(
-    host+name
-   )
- ){
-  return 'official';
+ if(/gov|edu|官方|旗舰店|alpicool|tesla|apple/.test(host+name)){
+  return'official';
  }
 
- if(
-  /jd\.com|taobao\.com|tmall\.com|amazon/
-   .test(host)
- ){
-  return 'platform';
+ if(/jd\.com|taobao\.com|tmall\.com|amazon/.test(host)){
+  return'platform';
  }
 
- if(
-  /news|36kr|ithome|thepaper|media/
-   .test(host)
- ){
-  return 'media';
+ if(/news|36kr|ithome|thepaper|media/.test(host)){
+  return'media';
  }
 
- if(
-  /zhihu|xiaohongshu|weibo|reddit|bbs|forum/
-   .test(host)
- ){
-  return 'community';
+ if(/zhihu|xiaohongshu|weibo|reddit|bbs|forum/.test(host)){
+  return'community';
  }
 
- return 'web';
+ return'web';
 }
-
 
 function evidenceOfGemini(o){
-
- const now=
-  new Date()
-   .toISOString();
-
+ const now=new Date().toISOString();
  const out=[];
 
- for(
-  const c
-  of o.candidates||[]
- ){
+ for(const c of o.candidates||[]){
+  const meta=c.groundingMetadata||{};
+  const chunks=meta.groundingChunks||[];
 
-  const meta=
-   c.groundingMetadata||{};
+  for(const s of meta.groundingSupports||[]){
+   const text=s.segment?.text||'';
 
-  const chunks=
-   meta.groundingChunks||[];
-
-  for(
-   const s
-   of meta.groundingSupports||[]
-  ){
-
-   const text=
-    s.segment?.text||'';
-
-   for(
-    const i
-    of s.groundingChunkIndices||[]
-   ){
-
-    const web=
-     chunks[i]?.web||
-     chunks[i]||
-     {};
-
-    const url=
-     web.uri||
-     web.url;
+   for(const i of s.groundingChunkIndices||[]){
+    const web=chunks[i]?.web||chunks[i]||{};
+    const url=web.uri||web.url;
 
     if(url){
-
      out.push({
-      title:
-       clean(
-        web.title||
-        new URL(url).hostname,
-        80
-       ),
-
+      title:clean(
+       web.title||new URL(url).hostname,
+       80
+      ),
       url,
-
-      snippet:
-       clean(
-        text,
-        220
-       ),
-
-      sourceType:
-       sourceType(
-        web.title,
-        url
-       ),
-
-      retrievedAt:
-       now
+      snippet:clean(text,220),
+      sourceType:sourceType(
+       web.title,
+       url
+      ),
+      retrievedAt:now
      });
-
     }
    }
   }
  }
 
  return out
-  .filter(
-   (x,i,a)=>
-    a.findIndex(
-     y=>
-      y.url===x.url&&
-      y.snippet===x.snippet
-    )===i
+  .filter((x,i,a)=>
+   a.findIndex(y=>
+    y.url===x.url&&
+    y.snippet===x.snippet
+   )===i
   )
-  .slice(
-   0,
-   20
-  );
+  .slice(0,20);
 }
 
-
-function normalizeEvidence(
- list=[]
-){
-
+function normalizeEvidence(list=[]){
  return Array.isArray(list)
   ? list
-     .filter(
-      x=>
-       x&&
-       typeof x.url==='string'&&
-       /^https?:\/\//
-        .test(x.url)
-     )
-     .slice(
-      0,
-      6
-     )
-     .map(
-      x=>({
-       title:
-        clean(
-         x.title||
-         x.url,
-         80
-        ),
-
-       url:
-        x.url,
-
-       snippet:
-        clean(
-         x.snippet||'',
-         220
-        ),
-
-       sourceType:
-        clean(
-         x.sourceType||
-         sourceType(
-          x.title,
-          x.url
-         ),
-         30
-        ),
-
-       retrievedAt:
-        clean(
-         x.retrievedAt||
-         new Date()
-          .toISOString(),
-         40
-        )
-      })
-     )
+   .filter(x=>
+    x&&
+    typeof x.url==='string'&&
+    /^https?:\/\//.test(x.url)
+   )
+   .slice(0,6)
+   .map(x=>({
+    title:clean(
+     x.title||x.url,
+     80
+    ),
+    url:x.url,
+    snippet:clean(
+     x.snippet||'',
+     220
+    ),
+    sourceType:clean(
+     x.sourceType||
+     sourceType(
+      x.title,
+      x.url
+     ),
+     30
+    ),
+    retrievedAt:clean(
+     x.retrievedAt||
+     new Date().toISOString(),
+     40
+    )
+   }))
   : [];
 }
 
-
-function attachEvidence(
- p,
- evidence=[]
-){
-
+function attachEvidence(p,evidence=[]){
  if(
-  !Array.isArray(
-   p?.sharedFacts
-  )||
+  !Array.isArray(p?.sharedFacts)||
   !evidence.length
  ){
   return p;
  }
 
- const pool=
-  normalizeEvidence(
-   evidence
-  );
+ const pool=normalizeEvidence(evidence);
 
- p.sharedFacts=
-  p.sharedFacts.map(
-   f=>{
+ p.sharedFacts=p.sharedFacts.map(f=>{
+  if(f.kind!=='fact'){
+   return f;
+  }
 
-    if(
-     f.kind!=='fact'
-    ){
-     return f;
-    }
+  const current=
+   normalizeEvidence(f.evidence);
 
-    const current=
-     normalizeEvidence(
-      f.evidence
-     );
+  const ev=current.length
+   ? current
+   : pool.filter(e=>
+      !e.snippet||
+      e.snippet.includes(
+       f.statement.slice(0,12)
+      )||
+      f.statement.includes(
+       e.snippet.slice(0,12)
+      )
+     ).slice(0,3);
 
-    const ev=
-     current.length
-      ? current
-      : pool
-         .filter(
-          e=>
-           !e.snippet||
-           e.snippet.includes(
-            f.statement.slice(
-             0,
-             12
-            )
-           )||
-           f.statement.includes(
-            e.snippet.slice(
-             0,
-             12
-            )
-           )
-         )
-         .slice(
-          0,
-          3
-         );
+  const attached=
+   ev.length
+    ? ev
+    : pool.slice(0,2);
 
-    const attached=
-     ev.length
-      ? ev
-      : pool.slice(
-         0,
-         2
-        );
-
-    return attached.length
-     ? {
-        ...f,
-
-        status:
-         'verified',
-
-        source:
-         attached[0].title,
-
-        evidence:
-         attached
-       }
-     : f;
-   }
-  );
+  return attached.length
+   ? {
+      ...f,
+      status:'verified',
+      source:attached[0].title,
+      evidence:attached
+     }
+   : f;
+ });
 
  return p;
 }
 
-
-function imageParts(
- images=[]
-){
-
+function imageParts(images=[]){
  return Array.isArray(images)
   ? images
-     .filter(
-      x=>
-       x&&
-       typeof x.mimeType==='string'&&
-       /^image\/(png|jpe?g|webp|gif)$/i
-        .test(
-         x.mimeType
-        )&&
-       typeof x.data==='string'&&
-       /^[A-Za-z0-9+/=]+$/
-        .test(
-         x.data
-        )&&
-       x.data.length<1400000
-     )
-     .slice(
-      0,
-      4
-     )
-     .map(
-      x=>({
-       mimeType:
-        x.mimeType.toLowerCase(),
-
-       data:
-        x.data
-      })
-     )
+   .filter(x=>
+    x&&
+    typeof x.mimeType==='string'&&
+    /^image\/(png|jpe?g|webp|gif)$/i
+     .test(x.mimeType)&&
+    typeof x.data==='string'&&
+    /^[A-Za-z0-9+/=]+$/.test(x.data)&&
+    x.data.length<1400000
+   )
+   .slice(0,4)
   : [];
 }
 
+function normalizeMedia(
+ list=[],
+ keepUnresolved=false
+){
+ return Array.isArray(list)
+  ? list
+   .filter(x=>{
+    if(!x){
+     return false;
+    }
 
-const remoteImageLimit=1000000;
+    const url=
+     typeof x.url==='string'
+      ? x.url.trim()
+      : '';
 
+    const sourceUrl=
+     typeof x.sourceUrl==='string'
+      ? x.sourceUrl.trim()
+      : '';
 
-function imageUrls(text=''){
+    const entity=
+     clean(
+      x.entity||x.title||'',
+      80
+     );
 
- const matches=String(text).match(/https?:\/\/[^\s<>"'`]+/gi)||[];
+    return /^https?:\/\//.test(url)||
+     (
+      keepUnresolved&&
+      entity&&
+      (
+       !url||
+       /^https?:\/\//.test(url)
+      )&&
+      (
+       !sourceUrl||
+       /^https?:\/\//.test(sourceUrl)
+      )
+     );
+   })
+   .slice(0,12)
+   .map(x=>({
+    url:/^https?:\/\//.test(x.url||'')
+     ? x.url.trim()
+     : '',
 
- return [...new Set(matches.map(value=>value.replace(/[),.;!?，。；！？）】]+$/,'')))]
-  .filter(value=>{
+    title:clean(
+     x.title||x.entity||'参考图片',
+     80
+    ),
+
+    caption:clean(
+     x.caption||'',
+     160
+    ),
+
+    source:clean(
+     x.source||'',
+     80
+    ),
+
+    sourceUrl:/^https?:\/\//.test(x.sourceUrl||'')
+     ? x.sourceUrl.trim()
+     : '',
+
+    entity:clean(
+     x.entity||x.title||'',
+     80
+    ),
+
+    factIds:Array.isArray(x.factIds)
+     ? x.factIds
+      .filter(y=>typeof y==='string')
+      .slice(0,8)
+     : []
+   }))
+  : [];
+}
+
+function privateAddress(address=''){
+ const ip=String(address).toLowerCase();
+ const version=net.isIP(ip);
+
+ if(version===4){
+  const p=ip.split('.').map(Number);
+
+  return p[0]===10||
+   p[0]===127||
+   p[0]===0||
+   (p[0]===169&&p[1]===254)||
+   (p[0]===172&&p[1]>=16&&p[1]<=31)||
+   (p[0]===192&&p[1]===168)||
+   (p[0]===100&&p[1]>=64&&p[1]<=127)||
+   p[0]>=224;
+ }
+
+ if(version===6){
+  return ip==='::1'||
+   ip==='::'||
+   ip.startsWith('fc')||
+   ip.startsWith('fd')||
+   ip.startsWith('fe80:')||
+   ip.startsWith('::ffff:127.')||
+   ip.startsWith('::ffff:10.')||
+   ip.startsWith('::ffff:192.168.');
+ }
+
+ return false;
+}
+
+async function safeRemoteUrl(raw){
+ try{
+  const u=new URL(raw);
+
+  if(
+   !['http:','https:']
+    .includes(u.protocol)
+  ){
+   return false;
+  }
+
+  const host=u.hostname
+   .toLowerCase();
+
+  if(
+   host==='localhost'||
+   host.endsWith('.localhost')||
+   host.endsWith('.local')||
+   host.endsWith('.internal')
+  ){
+   return false;
+  }
+
+  if(
+   net.isIP(host)&&
+   privateAddress(host)
+  ){
+   return false;
+  }
+
+  const addresses=
+   await dns.lookup(
+    host,
+    {all:true}
+   );
+
+  return addresses.length>0&&
+   addresses.every(
+    x=>!privateAddress(x.address)
+   );
+ }catch{
+  return false;
+ }
+}
+
+async function fetchRemote(
+ raw,
+ options={},
+ redirectCount=0
+){
+ if(
+  redirectCount>3||
+  !await safeRemoteUrl(raw)
+ ){
+  return null;
+ }
+
+ let response;
+
+ try{
+  response=await fetch(
+   raw,
+   {
+    ...options,
+    redirect:'manual',
+    signal:AbortSignal.timeout(10000),
+    headers:{
+     'User-Agent':
+      'Mozilla/5.0 (compatible; LiquidIntelligentWeb/1.0)',
+     'Accept-Language':
+      'zh-CN,zh;q=0.9,en;q=0.8',
+     ...(options.headers||{})
+    }
+   }
+  );
+ }catch{
+  return null;
+ }
+
+ if(
+  [301,302,303,307,308]
+   .includes(response.status)
+ ){
+  const location=
+   response.headers.get('location');
+
+  if(!location){
+   return null;
+  }
+
+  let next;
+
+  try{
+   next=new URL(
+    location,
+    raw
+   ).href;
+  }catch{
+   return null;
+  }
+
+  return fetchRemote(
+   next,
+   options,
+   redirectCount+1
+  );
+ }
+
+ return response;
+}
+
+async function limitedText(
+ response,
+ maxBytes=1500000
+){
+ if(!response?.body){
+  return '';
+ }
+
+ const reader=
+  response.body.getReader();
+
+ const decoder=
+  new TextDecoder();
+
+ let total=0;
+ let text='';
+
+ while(true){
+  const{done,value}=
+   await reader.read();
+
+  if(done){
+   break;
+  }
+
+  total+=value.byteLength;
+
+  if(total>maxBytes){
    try{
-    return /^\.(?:png|jpe?g|webp|gif)$/i.test(path.extname(new URL(value).pathname));
+    await reader.cancel();
+   }catch{}
+
+   break;
+  }
+
+  text+=decoder.decode(
+   value,
+   {stream:true}
+  );
+ }
+
+ text+=decoder.decode();
+
+ return text;
+}
+
+function decodeHtml(value=''){
+ return String(value)
+  .replace(/&amp;/gi,'&')
+  .replace(/&quot;/gi,'"')
+  .replace(/&#39;|&apos;/gi,"'")
+  .replace(/&lt;/gi,'<')
+  .replace(/&gt;/gi,'>')
+  .trim();
+}
+
+function metaContent(
+ html,
+ key
+){
+ const escaped=key
+  .replace(
+   /[.*+?^${}()|[\]\\]/g,
+   '\\$&'
+  );
+
+ const patterns=[
+  new RegExp(
+   `<meta[^>]+(?:property|name)=["']${escaped}["'][^>]+content=["']([^"']+)["'][^>]*>`,
+   'i'
+  ),
+  new RegExp(
+   `<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${escaped}["'][^>]*>`,
+   'i'
+  )
+ ];
+
+ for(const pattern of patterns){
+  const match=html.match(pattern);
+
+  if(match?.[1]){
+   return decodeHtml(match[1]);
+  }
+ }
+
+ return '';
+}
+
+function pageImageCandidates(
+ html,
+ pageUrl
+){
+ const values=[
+  metaContent(
+   html,
+   'og:image:secure_url'
+  ),
+  metaContent(
+   html,
+   'og:image'
+  ),
+  metaContent(
+   html,
+   'twitter:image'
+  ),
+  metaContent(
+   html,
+   'twitter:image:src'
+  )
+ ];
+
+ const linkMatch=html.match(
+  /<link[^>]+rel=["'](?:image_src|preload)["'][^>]+href=["']([^"']+)["'][^>]*>/i
+ );
+
+ if(linkMatch?.[1]){
+  values.push(
+   decodeHtml(linkMatch[1])
+  );
+ }
+
+ return values
+  .filter(Boolean)
+  .map(value=>{
+   try{
+    return new URL(
+     value,
+     pageUrl
+    ).href;
    }catch{
-    return false;
+    return '';
    }
   })
-  .slice(0,4);
+  .filter(Boolean)
+  .filter(
+   (x,i,a)=>a.indexOf(x)===i
+  )
+  .slice(0,6);
 }
 
-
-function isPrivateAddress(address){
-
- if(net.isIPv4(address)){
-  const parts=address.split('.').map(Number);
-  return parts[0]===10||parts[0]===127||parts[0]===0||
-   parts[0]===169&&parts[1]===254||
-   parts[0]===172&&parts[1]>=16&&parts[1]<=31||
-   parts[0]===192&&parts[1]===168||parts[0]>=224;
+async function verifiedImageUrl(raw){
+ if(
+  typeof raw!=='string'||
+  !/^https?:\/\//.test(raw)
+ ){
+  return '';
  }
 
- if(net.isIPv6(address)){
-  const value=address.toLowerCase();
-  return value==='::1'||value==='::'||value.startsWith('fc')||
-   value.startsWith('fd')||/^fe[89ab]/.test(value)||
-   value.startsWith('::ffff:127.')||value.startsWith('::ffff:10.')||
-   value.startsWith('::ffff:192.168.');
+ const candidates=[];
+
+ try{
+  const u=new URL(raw);
+
+  if(u.protocol==='http:'){
+   const secure=new URL(raw);
+   secure.protocol='https:';
+   candidates.push(secure.href);
+  }
+
+  candidates.push(u.href);
+ }catch{
+  return '';
  }
 
- return true;
-}
+ for(const candidate of candidates){
+  const response=
+   await fetchRemote(
+    candidate,
+    {
+     method:'GET',
+     headers:{
+      Range:'bytes=0-4095',
+      Accept:'image/avif,image/webp,image/apng,image/*,*/*;q=0.8'
+     }
+    }
+   );
 
-
-async function assertPublicImageUrl(value){
-
- const url=new URL(value);
-
- if(!['http:','https:'].includes(url.protocol)||url.username||url.password||!url.hostname){
-  throw Error('图片 URL 无效。');
- }
-
- const addresses=net.isIP(url.hostname)
-  ? [{address:url.hostname}]
-  : await dns.lookup(url.hostname,{all:true});
-
- if(!addresses.length||addresses.some(item=>isPrivateAddress(item.address))){
-  throw Error('图片 URL 不允许访问本机或内网地址。');
- }
-
- return url;
-}
-
-
-async function fetchImageUrl(value){
-
- let current=value.startsWith('http://')?`https://${value.slice(7)}`:value;
-
- for(let redirects=0;redirects<4;redirects++){
-
-  await assertPublicImageUrl(current);
-
-  const response=await fetch(current,{
-   redirect:'manual',
-   signal:AbortSignal.timeout(10000),
-   headers:{Accept:'image/*'}
-  });
-
-  if([301,302,303,307,308].includes(response.status)){
-   const location=response.headers.get('location');
-   if(!location)throw Error('图片 URL 重定向无效。');
-   current=new URL(location,current).href;
+  if(!response){
    continue;
   }
 
-  if(!response.ok)throw Error(`图片下载失败（${response.status}）。`);
+  const type=String(
+   response.headers.get(
+    'content-type'
+   )||''
+  ).toLowerCase();
 
-  const mimeType=(response.headers.get('content-type')||'').split(';')[0].toLowerCase();
-  if(!/^image\/(png|jpe?g|webp|gif)$/i.test(mimeType)){
-   throw Error('URL 返回的内容不是支持的图片格式。');
-  }
+  if(
+   (response.ok||response.status===206)&&
+   type.startsWith('image/')
+  ){
+   const finalUrl=response.url||candidate;
 
-  const declaredSize=Number(response.headers.get('content-length'));
-  if(declaredSize>remoteImageLimit)throw Error('URL 图片超过 1 MB 限制。');
+   if(
+    /^https:\/\//.test(finalUrl)
+   ){
+    try{
+     await response.body?.cancel();
+    }catch{}
 
-  const reader=response.body.getReader(),chunks=[];
-  let size=0;
-
-  while(true){
-   const {done,value:chunk}=await reader.read();
-   if(done)break;
-   size+=chunk.byteLength;
-   if(size>remoteImageLimit){
-    await reader.cancel();
-    throw Error('URL 图片超过 1 MB 限制。');
+    return finalUrl;
    }
-   chunks.push(Buffer.from(chunk));
   }
 
+  try{
+   await response.body?.cancel();
+  }catch{}
+ }
+
+ return '';
+}
+
+async function productImageFromPage(
+ sourceUrl
+){
+ if(
+  !/^https?:\/\//.test(
+   sourceUrl||''
+  )
+ ){
+  return '';
+ }
+
+ const response=
+  await fetchRemote(
+   sourceUrl,
+   {
+    method:'GET',
+    headers:{
+     Accept:'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8'
+    }
+   }
+  );
+
+ if(
+  !response||
+  !response.ok
+ ){
+  return '';
+ }
+
+ const type=String(
+  response.headers.get(
+   'content-type'
+  )||''
+ ).toLowerCase();
+
+ if(
+  !type.includes('text/html')&&
+  !type.includes('application/xhtml+xml')
+ ){
+  try{
+   await response.body?.cancel();
+  }catch{}
+
+  return '';
+ }
+
+ const html=
+  await limitedText(
+   response
+  );
+
+ for(
+  const candidate
+  of pageImageCandidates(
+   html,
+   response.url||sourceUrl
+  )
+ ){
+  const verified=
+   await verifiedImageUrl(
+    candidate
+   );
+
+  if(verified){
+   return verified;
+  }
+ }
+
+ return '';
+}
+
+function entityMatch(
+ text='',
+ entity=''
+){
+ const compact=value=>
+  String(value)
+   .toLowerCase()
+   .replace(
+    /[\s\-_·•（）()【】\[\]]+/g,
+    ''
+   );
+
+ const a=compact(text);
+ const b=compact(entity);
+
+ if(!a||!b){
+  return false;
+ }
+
+ return a.includes(b)||
+  b.includes(a)||
+  (
+   b.length>=4&&
+   a.includes(
+    b.slice(0,4)
+   )
+  );
+}
+
+function mediaEvidenceUrls(
+ item,
+ plan
+){
+ const entity=
+  item.entity||
+  item.title||
+  '';
+
+ const urls=[];
+
+ if(
+  /^https?:\/\//.test(
+   item.sourceUrl||''
+  )
+ ){
+  urls.push(
+   item.sourceUrl
+  );
+ }
+
+ for(
+  const fact
+  of plan?.sharedFacts||[]
+ ){
+  const relevant=
+   entityMatch(
+    fact.statement,
+    entity
+   )||
+   (fact.evidence||[])
+    .some(e=>
+     entityMatch(
+      `${e.title||''} ${e.snippet||''}`,
+      entity
+     )
+    );
+
+  if(!relevant){
+   continue;
+  }
+
+  for(
+   const evidence
+   of fact.evidence||[]
+  ){
+   if(
+    /^https?:\/\//.test(
+     evidence.url||''
+    )
+   ){
+    urls.push(
+     evidence.url
+    );
+   }
+  }
+ }
+
+ return [
+  ...new Set(urls)
+ ].slice(0,5);
+}
+
+async function resolveProductMediaItem(
+ item,
+ plan
+){
+ const entity=
+  clean(
+   item.entity||
+   item.title||
+   '',
+   80
+  );
+
+ if(!entity){
+  return null;
+ }
+
+ const direct=
+  await verifiedImageUrl(
+   item.url
+  );
+
+ if(direct){
   return{
-   mimeType,
-   data:Buffer.concat(chunks).toString('base64'),
-   sourceUrl:current
+   ...item,
+   entity,
+   title:
+    item.title||entity,
+   url:direct,
+   source:
+    item.source||
+    '网页图片',
+   sourceUrl:
+    item.sourceUrl||
+    direct
   };
  }
 
- throw Error('图片 URL 重定向次数过多。');
-}
-
-
-async function imageUrlsToParts(query,limit=4){
-
- const urls=imageUrls(query).slice(0,Math.max(0,limit));
- const images=[];
- const failures=[];
-
- for(const url of urls){
-  try{
-   images.push(await fetchImageUrl(url));
-  }catch(error){
-   failures.push({
-    url,
-    reason:error.message
-   });
-  }
- }
-
- return{
-  images:imageParts(images),
-  failures
- };
-}
-
-
-async function resolveQueryImages(query,images=[]){
-
- const uploaded=imageParts(images);
- const remote=await imageUrlsToParts(query,4-uploaded.length);
-
- return imageParts([
-  ...uploaded,
-  ...remote.images
- ]);
-}
-
-
-function describeImageInput(uploaded,remote){
-
- const success=uploaded.length+remote.images.length;
- const failed=remote.failures.length;
-
- if(!success&&!failed){
-  return '未提供图片。';
- }
-
- if(!success){
-  return `图片读取失败：${failed} 个图片 URL 均未成功解析，暂时无法进行视觉分析。`;
- }
-
- if(failed){
-  return `已成功解析 ${success} 张图片并作为图片数据传入；另有 ${failed} 个图片 URL 读取失败，只允许分析成功传入的图片。`;
- }
-
- return `已成功解析 ${success} 张图片并作为图片数据传入。`;
-}
-
-
-function imageDisplayRequested(query=''){
- return /(?:展示|显示|配图|图片墙|图片对比|产品图|商品图|竞品图|品牌图|找图|搜索图片|搜图|show|display|gallery)\s*(?:相关|产品|商品|品牌|竞品|图片|image)?/i.test(String(query));
-}
-
-
-async function verifyDisplayMedia(page,enabled){
- if(!enabled){
-  for(const section of page.sections)section.media=[];
-  return page;
- }
- let remaining=6;
- for(const section of page.sections){
-  if(!['image','image_gallery','product_image'].includes(section.type)){
-   section.media=[];
-   continue;
-  }
-  const verified=[];
-  for(const media of section.media.slice(0,remaining)){
-   try{
-    const checked=await fetchImageUrl(media.url);
-    verified.push({...media,url:checked.sourceUrl});
-    remaining--;
-   }catch{}
-   if(!remaining)break;
-  }
-  section.media=verified;
- }
- return page;
-}
-
-
-async function commonsImage(entity){
- const endpoint='https://commons.wikimedia.org/w/api.php?'+new URLSearchParams({action:'query',generator:'search',gsrsearch:entity,gsrnamespace:'6',gsrlimit:'5',prop:'imageinfo',iiprop:'url|mime',iiurlwidth:'720',format:'json',origin:'*'});
- const response=await fetch(endpoint,{signal:AbortSignal.timeout(10000),headers:{Accept:'application/json'}});
- if(!response.ok)return null;
- const data=await response.json();
- const pages=Object.values(data.query?.pages||{});
- for(const item of pages){
-  const info=item.imageinfo?.[0];
-  const url=info?.thumburl||info?.url;
-  if(!url||!/^image\/(png|jpe?g|webp)$/i.test(info.mime||''))continue;
-  try{
-   const checked=await fetchImageUrl(url);
-   return{url:checked.sourceUrl,title:entity,caption:`${entity} 的公开参考图片，具体产品型号以来源页面为准。`,source:'Wikimedia Commons',sourceUrl:info.descriptionurl||'https://commons.wikimedia.org/',entity,factIds:[]};
-  }catch{}
- }
- return null;
-}
-
-
-async function wikipediaImage(entity,language){
- const endpoint=`https://${language}.wikipedia.org/w/api.php?`+new URLSearchParams({action:'query',generator:'search',gsrsearch:entity,gsrlimit:'3',prop:'pageimages|info',piprop:'thumbnail',pithumbsize:'720',inprop:'url',format:'json',origin:'*'});
- const response=await fetch(endpoint,{signal:AbortSignal.timeout(10000),headers:{Accept:'application/json'}});
- if(!response.ok)return null;
- const data=await response.json();
- const pages=Object.values(data.query?.pages||{}).sort((a,b)=>(a.index||99)-(b.index||99));
- for(const item of pages){
-  const url=item.thumbnail?.source;
-  if(!url)continue;
-  try{
-   const checked=await fetchImageUrl(url);
-   return{url:checked.sourceUrl,title:entity,caption:`${entity} 的百科条目参考图片，具体版本与型号以来源页面为准。`,source:language==='zh'?'中文维基百科':'Wikipedia',sourceUrl:item.fullurl||`https://${language}.wikipedia.org/`,entity,factIds:[]};
-  }catch{}
- }
- return null;
-}
-
-
-async function referenceImage(entity){
- return await wikipediaImage(entity,'zh')||
-  await wikipediaImage(entity,'en')||
-  await commonsImage(entity);
-}
-
-
-async function addDisplayMediaFallback(page,enabled){
- if(!enabled)return page;
- const entities=[...new Set(page.sections.flatMap(section=>section.links.map(link=>link.label)))].filter(Boolean).slice(0,4);
- const imageSections=page.sections.filter(section=>['image','image_gallery','product_image'].includes(section.type));
- const existing=imageSections.flatMap(section=>section.media);
- const existingNames=new Set(existing.map(item=>String(item.entity||item.title).toLowerCase()));
- const media=[];
- for(const entity of entities){
-  if(existingNames.has(String(entity).toLowerCase()))continue;
-  try{
-   const item=await referenceImage(entity);
-   if(item)media.push(item);
-  }catch{}
- }
- if(!media.length)return page;
- if(imageSections.length){
-  imageSections[0].media=[...imageSections[0].media,...media].slice(0,6);
- }else{
-  page.sections.push({type:'product_image',heading:'品牌与竞品图片',intro:'以下为经过访问校验的公开参考图片；产品版本与型号请以来源页面为准。',items:[],rows:[],resultLabel:'',factIds:[],links:[],media});
- }
- return page;
-}
-
-
-function normalizeMedia(
- list=[]
-){
-
- return Array.isArray(list)
-  ? list
-     .filter(
-      x=>
-       x&&
-       typeof x.url==='string'&&
-       /^https?:\/\//
-        .test(
-         x.url
-        )
-     )
-     .slice(
-      0,
-      12
-     )
-     .map(
-      x=>({
-       url:
-        x.url,
-
-       title:
-        clean(
-         x.title||
-         x.entity||
-         '参考图片',
-         80
-        ),
-
-       caption:
-        clean(
-         x.caption||'',
-         160
-        ),
-
-       source:
-        clean(
-         x.source||'',
-         80
-        ),
-
-       sourceUrl:
-        /^https?:\/\//
-         .test(
-          x.sourceUrl||''
-         )
-          ? x.sourceUrl
-          : '',
-
-       entity:
-        clean(
-         x.entity||'',
-         80
-        ),
-
-       factIds:
-        Array.isArray(
-         x.factIds
-        )
-         ? x.factIds
-            .filter(
-             y=>
-              typeof y==='string'
-            )
-            .slice(
-             0,
-             8
-            )
-         : []
-      })
-     )
-  : [];
-}
-
-
-function parsePlan(o){
-
- const p=
-  jsonOf(
-   o,
-   '方案'
+ const sourceUrls=
+  mediaEvidenceUrls(
+   item,
+   plan
   );
 
- const v=
-  p?.variants;
+ for(
+  const sourceUrl
+  of sourceUrls
+ ){
+  const imageUrl=
+   await productImageFromPage(
+    sourceUrl
+   );
 
- const f=
-  p?.sharedFacts;
+  if(!imageUrl){
+   continue;
+  }
+
+  let source=
+   item.source;
+
+  if(!source){
+   try{
+    source=
+     new URL(
+      sourceUrl
+     ).hostname;
+   }catch{
+    source='产品来源页';
+   }
+  }
+
+  return{
+   ...item,
+   entity,
+   title:
+    item.title||entity,
+   url:imageUrl,
+   source,
+   sourceUrl
+  };
+ }
+
+ return null;
+}
+
+function productSeedsFromLinks(
+ section
+){
+ const seen=new Set();
+ const out=[];
+
+ for(
+  const link
+  of section.links||[]
+ ){
+  const entity=
+   clean(
+    link.label||
+    link.query||
+    '',
+    80
+   );
+
+  if(
+   !entity||
+   seen.has(entity)
+  ){
+   continue;
+  }
+
+  seen.add(entity);
+
+  out.push({
+   url:'',
+   title:entity,
+   caption:'',
+   source:'',
+   sourceUrl:'',
+   entity,
+   factIds:
+    Array.isArray(
+     section.factIds
+    )
+     ? section.factIds
+     : []
+  });
+ }
+
+ return out.slice(0,4);
+}
+
+function isGenericCandidateLabel(
+ value=''
+){
+ const text=
+  clean(
+   value,
+   80
+  )
+   .toLowerCase();
+
+ if(
+  !text||
+  text.length<2||
+  text.length>50
+ ){
+  return true;
+ }
+
+ if(
+  /^[\d\s.%¥￥$+\-/×x~～]+$/i
+   .test(text)
+ ){
+  return true;
+ }
+
+ return /^(对比维度|对比项|参数|项目|指标|维度|产品|商品|品牌|型号|车型|候选|名称|方案|选项|定位|核心优势|主要短板|适用人群|风险与待核实参数|价格|售价|预算|尺寸|重量|续航|容量|噪音|功率|匹配度|推荐度)$/i
+  .test(text);
+}
+
+function candidateLabelsFromSection(
+ section
+){
+ if(
+  !section||
+  ![
+   'comparison',
+   'table'
+  ].includes(
+   section.type
+  )||
+  !Array.isArray(
+   section.rows
+  )||
+  section.rows.length<2
+ ){
+  return [];
+ }
+
+ const rows=
+  section.rows;
+
+ const header=
+  Array.isArray(
+   rows[0]
+  )
+   ? rows[0]
+   : [];
+
+ if(
+  header.length<2
+ ){
+  return [];
+ }
+
+ const first=
+  clean(
+   header[0]||'',
+   60
+  );
+
+ const columnOriented=
+  /对比|维度|项目|指标|参数|选项/i
+   .test(first);
+
+ if(
+  columnOriented
+ ){
+  const labels=
+   header
+    .slice(1)
+    .map(
+     x=>
+      clean(
+       x,
+       80
+      )
+    )
+    .filter(
+     x=>
+      !isGenericCandidateLabel(
+       x
+      )
+    );
+
+  if(
+   labels.length>=2&&
+   labels.length<=4
+  ){
+   return labels;
+  }
+ }
+
+ if(
+  /产品|商品|品牌|型号|车型|候选|名称|方案|选项/i
+   .test(first)
+ ){
+  const labels=
+   rows
+    .slice(1)
+    .map(
+     r=>
+      Array.isArray(r)
+       ? clean(
+          r[0]||'',
+          80
+         )
+       : ''
+    )
+    .filter(
+     x=>
+      !isGenericCandidateLabel(
+       x
+      )
+    )
+    .slice(
+     0,
+     4
+    );
+
+  if(
+   labels.length>=2
+  ){
+   return labels;
+  }
+ }
+
+ return [];
+}
+
+function looksLikeProductTask(
+ page,
+ query=''
+){
+ const text=[
+  query,
+  page?.title,
+  page?.subtitle,
+  page?.summary,
+  ...(
+   page?.sections||
+   []
+  ).flatMap(
+   s=>[
+    s.heading,
+    s.intro
+   ]
+  )
+ ]
+  .filter(Boolean)
+  .join(' ');
+
+ return /商品|产品|品牌|型号|车型|车载|轿车|汽车|新能源|手机|电脑|耳机|相机|冰箱|空调|净化器|电视|家电|选购|购买|推荐|价格|预算|配置|续航|电池|容量|款/i
+  .test(text);
+}
+
+function linksForCandidates(
+ page,
+ candidates
+){
+ const allLinks=
+  (
+   page?.sections||
+   []
+  )
+  .flatMap(
+   s=>
+    Array.isArray(s.links)
+     ? s.links
+     : []
+  );
+
+ const out=[];
+ const seen=new Set();
+
+ for(
+  const candidate
+  of candidates
+ ){
+  const matched=
+   allLinks.filter(
+    link=>
+     entityMatch(
+      `${
+       link.label||
+       ''
+      } ${
+       link.query||
+       ''
+      }`,
+      candidate
+     )
+   );
+
+  for(
+   const link
+   of matched
+  ){
+   const key=
+    `${
+     link.channel
+    }::${
+     link.query
+    }`;
+
+   if(
+    seen.has(key)
+   ){
+    continue;
+   }
+
+   seen.add(key);
+
+   out.push({
+    label:
+     clean(
+      link.label||
+      candidate,
+      80
+     ),
+
+    query:
+     clean(
+      link.query||
+      candidate,
+      120
+     ),
+
+    channel:
+     [
+      'official',
+      'jd',
+      'taobao'
+     ].includes(
+      link.channel
+     )
+      ? link.channel
+      : 'official'
+   });
+  }
+
+  const hasCandidate=
+   out.some(
+    link=>
+     entityMatch(
+      `${
+       link.label
+      } ${
+       link.query
+      }`,
+      candidate
+     )
+   );
+
+  if(
+   !hasCandidate
+  ){
+   for(
+    const channel
+    of [
+     'jd',
+     'taobao'
+    ]
+   ){
+    const key=
+     `${channel}::${candidate}`;
+
+    if(
+     seen.has(key)
+    ){
+     continue;
+    }
+
+    seen.add(key);
+
+    out.push({
+     label:
+      candidate,
+
+     query:
+      candidate,
+
+     channel
+    });
+   }
+  }
+ }
+
+ return out.slice(
+  0,
+  9
+ );
+}
+
+function ensureProductImageSection(
+ page,
+ plan,
+ query=''
+){
+ if(
+  !page||
+  !Array.isArray(
+   page.sections
+  )||
+  !looksLikeProductTask(
+   page,
+   query
+  )
+ ){
+  return page;
+ }
+
+ let sourceIndex=-1;
+ let candidates=[];
+
+ for(
+  let i=0;
+  i<
+  page.sections.length;
+  i++
+ ){
+  const found=
+   candidateLabelsFromSection(
+    page.sections[i]
+   );
+
+  if(
+   found.length>
+   candidates.length
+  ){
+   candidates=
+    found;
+
+   sourceIndex=i;
+  }
+ }
+
+ if(
+  candidates.length<2
+ ){
+  return page;
+ }
+
+ const existing=
+  page.sections.find(
+   s=>
+    s.type===
+    'product_image'
+  );
+
+ const sourceSection=
+  page.sections[
+   sourceIndex
+  ]||{};
+
+ const sharedFactIds=
+  Array.isArray(
+   sourceSection.factIds
+  )
+   ? sourceSection.factIds
+      .slice(
+       0,
+       12
+      )
+   : [];
+
+ const seeds=
+  candidates.map(
+   candidate=>({
+    url:'',
+
+    title:
+     candidate,
+
+    caption:
+     '候选产品图片仅用于快速识别与视觉参考，具体参数与价格以页面中的事实证据为准。',
+
+    source:'',
+
+    sourceUrl:'',
+
+    entity:
+     candidate,
+
+    factIds:
+     sharedFactIds
+   })
+  );
+
+ const links=
+  linksForCandidates(
+   page,
+   candidates
+  );
+
+ if(existing){
+  if(
+   !Array.isArray(
+    existing.media
+   )||
+   !existing.media.length
+  ){
+   existing.media=
+    seeds;
+  }
+
+  if(
+   !Array.isArray(
+    existing.links
+   )||
+   !existing.links.length
+  ){
+   existing.links=
+    links;
+  }
+
+  if(
+   !existing.heading
+  ){
+   existing.heading=
+    '候选产品图文一览';
+  }
+
+  return page;
+ }
+
+ const section={
+  type:
+   'product_image',
+
+  heading:
+   '候选产品图文一览',
+
+  intro:
+   '先通过产品图片快速建立识别，再结合下方参数、事实证据与风险项进行比较。图片仅用于视觉展示，不作为参数真实性证据。',
+
+  items:[],
+
+  rows:[],
+
+  resultLabel:'',
+
+  factIds:
+   sharedFactIds,
+
+  links,
+
+  media:
+   seeds
+ };
+
+ let insertAt=
+  Math.max(
+   0,
+   sourceIndex
+  );
+
+ if(
+  page.sections.length>=8
+ ){
+  let removeAt=-1;
+
+  for(
+   let i=
+    page.sections.length-1;
+   i>=0;
+   i--
+  ){
+   if(
+    i!==sourceIndex&&
+    [
+     'narrative',
+     'cards',
+     'steps',
+     'checklist'
+    ].includes(
+     page.sections[i].type
+    )
+   ){
+    removeAt=i;
+    break;
+   }
+  }
+
+  if(
+   removeAt>=0
+  ){
+   page.sections.splice(
+    removeAt,
+    1
+   );
+
+   if(
+    removeAt<
+    insertAt
+   ){
+    insertAt--;
+   }
+  }
+ }
+
+ page.sections.splice(
+  Math.max(
+   0,
+   Math.min(
+    insertAt,
+    page.sections.length
+   )
+  ),
+  0,
+  section
+ );
+
+ return page;
+}
+
+async function enrichProductMedia(
+ page,
+ plan
+){
+ if(
+  !page||
+  !Array.isArray(
+   page.sections
+  )
+ ){
+  return page;
+ }
+
+ for(
+  const section
+  of page.sections
+ ){
+  if(
+   section.type!==
+   'product_image'
+  ){
+   continue;
+  }
+
+  const seeds=
+   section.media?.length
+    ? section.media
+    : productSeedsFromLinks(
+       section
+      );
+
+  const resolved=
+   await Promise.all(
+    seeds
+     .slice(0,4)
+     .map(item=>
+      resolveProductMediaItem(
+       item,
+       plan
+      )
+     )
+   );
+
+  section.media=
+   resolved
+    .filter(Boolean)
+    .slice(0,4);
+ }
+
+ return page;
+}
+
+function parsePlan(o){
+ const p=jsonOf(o,'方案');
+ const v=p?.variants;
+ const f=p?.sharedFacts;
 
  if(
   !p||
   typeof p.title!=='string'||
   typeof p.taskType!=='string'||
-  !Array.isArray(
-   p.constraints
-  )||
+  !Array.isArray(p.constraints)||
   !p.constraints.every(
-   x=>
-    typeof x==='string'
+   x=>typeof x==='string'
   )||
   !Array.isArray(f)||
-  !f.every(
-   x=>
-    x&&
-    typeof x.id==='string'&&
-    typeof x.statement==='string'&&
-    [
-     'user',
-     'fact',
-     'assumption',
-     'calculation'
-    ].includes(
-     x.kind
-    )&&
-    [
-     'provided',
-     'verified',
-     'unverified'
-    ].includes(
-     x.status
-    )&&
-    typeof x.source==='string'
+  !f.every(x=>
+   x&&
+   typeof x.id==='string'&&
+   typeof x.statement==='string'&&
+   [
+    'user',
+    'fact',
+    'assumption',
+    'calculation'
+   ].includes(x.kind)&&
+   [
+    'provided',
+    'verified',
+    'unverified'
+   ].includes(x.status)&&
+   typeof x.source==='string'
   )||
   !Array.isArray(v)||
   v.length!==7||
-  !v.every(
-   x=>
-    x&&
-    [
-     'title',
-     'audience',
-     'focus',
-     'outcome'
-    ].every(
-     k=>
-      typeof x[k]==='string'&&
-      x[k].trim()
-    )&&
-    layouts.includes(
-     x.layout
-    )&&
-    Array.isArray(
-     x.outline
-    )&&
-    x.outline.length>=3&&
-    x.outline.length<=6&&
-    x.outline.every(
-     y=>
-      typeof y==='string'
-    )&&
-    Array.isArray(
-     x.components
-    )&&
-    x.components.length&&
-    x.components.every(
-     y=>
-      types.includes(y)
-    )
+  !v.every(x=>
+   x&&
+   [
+    'title',
+    'audience',
+    'focus',
+    'outcome'
+   ].every(k=>
+    typeof x[k]==='string'&&
+    x[k].trim()
+   )&&
+   layouts.includes(x.layout)&&
+   Array.isArray(x.outline)&&
+   x.outline.length>=3&&
+   x.outline.length<=6&&
+   x.outline.every(
+    y=>typeof y==='string'
+   )&&
+   Array.isArray(x.components)&&
+   x.components.length&&
+   x.components.every(
+    y=>types.includes(y)
+   )
   )
  ){
   throw Error(
@@ -1304,133 +1757,59 @@ function parsePlan(o){
   );
  }
 
- p.title=
-  clean(
-   p.title,
-   50
-  );
-
- p.taskType=
-  clean(
-   p.taskType,
-   24
-  );
+ p.title=clean(p.title,50);
+ p.taskType=clean(p.taskType,24);
 
  p.constraints=
   p.constraints
-   .slice(
-    0,
-    12
-   )
-   .map(
-    x=>
-     clean(
-      x,
-      100
-     )
-   );
+   .slice(0,12)
+   .map(x=>clean(x,100));
 
  p.sharedFacts=
   p.sharedFacts
-   .slice(
-    0,
-    20
-   )
-   .map(
-    x=>{
+   .slice(0,20)
+   .map(x=>{
+    const ev=
+     normalizeEvidence(x.evidence);
 
-     const ev=
-      normalizeEvidence(
-       x.evidence
-      );
+    const fact={
+     ...x,
+     id:clean(x.id,30),
+     statement:clean(
+      x.statement,
+      160
+     ),
+     source:clean(
+      x.source,
+      100
+     )
+    };
 
-     const fact={
-      ...x,
-
-      id:
-       clean(
-        x.id,
-        30
-       ),
-
-      statement:
-       clean(
-        x.statement,
-        160
-       ),
-
-      source:
-       clean(
-        x.source,
-        100
-       )
-     };
-
-     if(
-      ev.length
-     ){
-      fact.evidence=
-       ev;
-     }
-
-     return fact;
+    if(ev.length){
+     fact.evidence=ev;
     }
-   );
+
+    return fact;
+   });
 
  p.variants=
-  p.variants.map(
-   (x,i)=>({
-    ...x,
-
-    layout:
-     layouts[i],
-
-    title:
-     clean(
-      x.title,
-      30
-     ),
-
-    audience:
-     clean(
-      x.audience,
-      70
-     ),
-
-    focus:
-     clean(
-      x.focus,
-      100
-     ),
-
-    outcome:
-     clean(
-      x.outcome,
-      80
-     ),
-
-    outline:
-     x.outline.map(
-      y=>
-       clean(
-        y,
-        70
-       )
-     )
-   })
-  );
+  p.variants.map((x,i)=>({
+   ...x,
+   layout:layouts[i],
+   title:clean(x.title,30),
+   audience:clean(x.audience,70),
+   focus:clean(x.focus,100),
+   outcome:clean(x.outcome,80),
+   outline:x.outline.map(
+    y=>clean(y,70)
+   )
+  }));
 
  return p;
 }
 
-
 function parsePage(o){
-
- const p=
-  jsonOf(
-   o,
-   '页面'
-  );
+ const p=jsonOf(o,'页面');
 
  if(
   !p||
@@ -1439,84 +1818,57 @@ function parsePage(o){
    'subtitle',
    'summary'
   ].every(
-   k=>
-    typeof p[k]==='string'
+   k=>typeof p[k]==='string'
   )||
-  !Array.isArray(
-   p.sections
-  )||
+  !Array.isArray(p.sections)||
   p.sections.length<3||
   p.sections.length>8||
-  !p.sections.every(
-   s=>
-    s&&
-    types.includes(
-     s.type
-    )&&
-    typeof s.heading==='string'&&
-    typeof s.intro==='string'&&
-    Array.isArray(
-     s.items
-    )&&
-    s.items.every(
-     x=>
-      typeof x==='string'
-    )&&
-    Array.isArray(
-     s.rows
-    )&&
-    s.rows.every(
-     r=>
-      Array.isArray(r)&&
-      r.every(
-       x=>
-        typeof x==='string'
-      )
-    )&&
-    typeof s.resultLabel==='string'&&
-    Array.isArray(
-     s.factIds
-    )&&
-    s.factIds.every(
-     x=>
-      typeof x==='string'
-    )&&
-    Array.isArray(
-     s.links
-    )&&
-    s.links.every(
-     x=>
-      x&&
-      typeof x.label==='string'&&
-      typeof x.query==='string'&&
-      [
-       'official',
-       'jd',
-       'taobao'
-      ].includes(
-       x.channel
-      )
-    )&&
-    Array.isArray(
-     s.media
-    )&&
-    s.media.every(
-     x=>
-      x&&
-      typeof x.url==='string'&&
-      typeof x.title==='string'&&
-      typeof x.caption==='string'&&
-      typeof x.source==='string'&&
-      typeof x.sourceUrl==='string'&&
-      typeof x.entity==='string'&&
-      Array.isArray(
-       x.factIds
-      )&&
-      x.factIds.every(
-       y=>
-        typeof y==='string'
-      )
+  !p.sections.every(s=>
+   s&&
+   types.includes(s.type)&&
+   typeof s.heading==='string'&&
+   typeof s.intro==='string'&&
+   Array.isArray(s.items)&&
+   s.items.every(
+    x=>typeof x==='string'
+   )&&
+   Array.isArray(s.rows)&&
+   s.rows.every(r=>
+    Array.isArray(r)&&
+    r.every(
+     x=>typeof x==='string'
     )
+   )&&
+   typeof s.resultLabel==='string'&&
+   Array.isArray(s.factIds)&&
+   s.factIds.every(
+    x=>typeof x==='string'
+   )&&
+   Array.isArray(s.links)&&
+   s.links.every(x=>
+    x&&
+    typeof x.label==='string'&&
+    typeof x.query==='string'&&
+    [
+     'official',
+     'jd',
+     'taobao'
+    ].includes(x.channel)
+   )&&
+   Array.isArray(s.media)&&
+   s.media.every(x=>
+    x&&
+    typeof x.url==='string'&&
+    typeof x.title==='string'&&
+    typeof x.caption==='string'&&
+    typeof x.source==='string'&&
+    typeof x.sourceUrl==='string'&&
+    typeof x.entity==='string'&&
+    Array.isArray(x.factIds)&&
+    x.factIds.every(y=>
+     typeof y==='string'
+    )
+   )
   )
  ){
   throw Error(
@@ -1524,104 +1876,53 @@ function parsePage(o){
   );
  }
 
- for(
-  const s
-  of p.sections
- ){
-
-  s.media=
-   normalizeMedia(
-    s.media
-   );
+ for(const s of p.sections){
+  s.media=normalizeMedia(
+   s.media,
+   s.type==='product_image'
+  );
 
   s.formula=
-   [
-    'sum',
-    'product'
-   ].includes(
-    s.items[0]
-   )
-    ? s.items[0]
-    : 'none';
+   ['sum','product']
+    .includes(s.items[0])
+     ? s.items[0]
+     : 'none';
 
   s.fields=
    s.type==='calculator'
     ? s.rows
        .slice(1)
-       .map(
-        r=>({
-         label:
-          r[0]||
-          '项目',
-
-         value:
-          Number(
-           r[1]
-          )||0,
-
-         min:
-          Number(
-           r[2]
-          )||0,
-
-         max:
-          Number(
-           r[3]
-          )||100,
-
-         step:
-          Number(
-           r[4]
-          )||1,
-
-         unit:
-          r[5]||
-          ''
-        })
-       )
+       .map(r=>({
+        label:r[0]||'项目',
+        value:Number(r[1])||0,
+        min:Number(r[2])||0,
+        max:Number(r[3])||100,
+        step:Number(r[4])||1,
+        unit:r[5]||''
+       }))
     : [];
  }
 
  return p;
 }
 
-
-function modelError(
- status,
- detail=''
-){
-
+function modelError(status,detail=''){
  const m={
-  400:
-   '模型或请求配置不受支持。',
-
-  401:
-   'API Key 无效。',
-
-  403:
-   '当前项目没有访问权限。',
-
-  404:
-   '模型不存在或无法访问。',
-
-  429:
-   'API 配额不足或请求过于频繁。',
-
-  503:
-   '模型服务繁忙，请稍后重试。'
+  400:'模型或请求配置不受支持。',
+  401:'API Key 无效。',
+  403:'当前项目没有访问权限。',
+  404:'模型不存在或无法访问。',
+  429:'API 配额不足或请求过于频繁。',
+  503:'模型服务繁忙，请稍后重试。'
  };
 
- const error=
-  Error(
-   m[status]||
-   `模型服务暂时不可用（${status}）。`
-  );
+ const error=Error(
+  m[status]||
+  `模型服务暂时不可用（${status}）。`
+ );
 
- error.detail=
-  detail;
-
- error.apiStatus=
-  status;
+ error.detail=detail;
+ error.apiStatus=status;
 
  console.error(
   'Model API error:',
@@ -1632,48 +1933,25 @@ function modelError(
  return error;
 }
 
-
 async function postModel(
  endpoint,
  payload,
  headers
 ){
+ let r,o,lastDetail='';
 
- let r;
- let o;
- let lastDetail='';
-
- for(
-  let attempt=0;
-  attempt<3;
-  attempt++
- ){
-
-  r=
-   await fetch(
-    endpoint,
-    {
-     method:
-      'POST',
-
-     signal:
-      AbortSignal.timeout(
-       90000
-      ),
-
-     headers,
-
-     body:
-      JSON.stringify(
-       payload
-      )
-    }
-   );
+ for(let attempt=0;attempt<3;attempt++){
+  r=await fetch(endpoint,{
+   method:'POST',
+   signal:AbortSignal.timeout(
+    90000
+   ),
+   headers,
+   body:JSON.stringify(payload)
+  });
 
   if(r.ok){
-
-   o=
-    await r.json();
+   o=await r.json();
 
    return{
     r,
@@ -1683,15 +1961,12 @@ async function postModel(
   }
 
   try{
-
-   const data=
-    await r.json();
+   const data=await r.json();
 
    lastDetail=
     data.error?.message||
     data.message||
     '';
-
   }catch{}
 
   if(
@@ -1701,21 +1976,18 @@ async function postModel(
     502,
     503,
     504
-   ].includes(
-    r.status
-   )||
+   ].includes(r.status)||
    attempt===2
   ){
    break;
   }
 
-  await new Promise(
-   resolve=>
-    setTimeout(
-     resolve,
-     800*2**attempt+
-     Math.random()*300
-    )
+  await new Promise(resolve=>
+   setTimeout(
+    resolve,
+    800*2**attempt+
+    Math.random()*300
+   )
   );
  }
 
@@ -1726,31 +1998,17 @@ async function postModel(
  };
 }
 
-
 function wrapText(text){
-
  return{
-  output:[
-   {
-    type:
-     'message',
-
-    content:[
-     {
-      type:
-       'output_text',
-
-      text:
-       String(
-        text||''
-       )
-     }
-    ]
-   }
-  ]
+  output:[{
+   type:'message',
+   content:[{
+    type:'output_text',
+    text:String(text||'')
+   }]
+  }]
  };
 }
-
 
 async function requestCloseAI(
  input,
@@ -1759,14 +2017,11 @@ async function requestCloseAI(
  parser,
  images=[]
 ){
-
  const endpoint=
   `${closeAIBase}/chat/completions`;
 
  const schemaText=
-  JSON.stringify(
-   schema
-  );
+  JSON.stringify(schema);
 
  const systemPrompt=
   instructions+
@@ -1778,70 +2033,42 @@ async function requestCloseAI(
   schemaText;
 
  const headers={
-  'Content-Type':
-   'application/json',
-
-  Authorization:
-   `Bearer ${apiKey()}`
+  'Content-Type':'application/json',
+  Authorization:`Bearer ${apiKey()}`
  };
 
  const makePayload=
   messages=>({
    model,
-
    messages,
-
    response_format:{
-    type:
-     'json_object'
+    type:'json_object'
    },
-
-   temperature:
-    0.1
+   temperature:0.1
   });
 
  let payload=
   makePayload([
    {
-    role:
-     'system',
-
-    content:
-     systemPrompt
+    role:'system',
+    content:systemPrompt
    },
-
    {
-    role:
-     'user',
-
-    content:
-     imageParts(
-      images
-     ).length
-      ? [
-         {
-          type:
-           'text',
-
-          text:
-           input
-         },
-
-         ...imageParts(
-          images
-         ).map(
-          img=>({
-           type:
-            'image_url',
-
-           image_url:{
-            url:
-             `data:${img.mimeType};base64,${img.data}`
-           }
-          })
-         )
-        ]
-      : input
+    role:'user',
+    content:imageParts(images).length
+     ? [
+        {
+         type:'text',
+         text:input
+        },
+        ...imageParts(images).map(img=>({
+         type:'image_url',
+         image_url:{
+          url:`data:${img.mimeType};base64,${img.data}`
+         }
+        }))
+       ]
+     : input
    }
   ]);
 
@@ -1856,7 +2083,6 @@ async function requestCloseAI(
   !result.r?.ok&&
   result.r?.status===400
  ){
-
   const fallback={
    ...payload
   };
@@ -1871,13 +2097,9 @@ async function requestCloseAI(
    );
  }
 
- if(
-  !result.r?.ok
- ){
+ if(!result.r?.ok){
   throw modelError(
-   result.r?.status||
-   502,
-
+   result.r?.status||502,
    result.lastDetail
   );
  }
@@ -1889,37 +2111,27 @@ async function requestCloseAI(
    ?.message
    ?.content;
 
- if(
-  !content
- ){
+ if(!content){
   throw Error(
    '模型返回为空，请重试。'
   );
  }
 
  try{
-
   return parser(
-   wrapText(
-    content
-   )
+   wrapText(content)
   );
-
  }catch(firstError){
-
   console.warn(
    '模型 JSON 第一次校验失败，尝试自动修复：',
    firstError.message
   );
-
  }
 
  const repairPayload=
   makePayload([
    {
-    role:
-     'system',
-
+    role:'system',
     content:
      '你是 JSON 修复器。'+
      '\n必须把用户提供的 JSON 修复成严格符合下面 JSON Schema 的结果。'+
@@ -1929,11 +2141,8 @@ async function requestCloseAI(
      '\nJSON Schema：\n'+
      schemaText
    },
-
    {
-    role:
-     'user',
-
+    role:'user',
     content:
      '请修复下面的 JSON，使其严格符合 Schema：\n\n'+
      content
@@ -1951,7 +2160,6 @@ async function requestCloseAI(
   !repaired.r?.ok&&
   repaired.r?.status===400
  ){
-
   const fallback={
    ...repairPayload
   };
@@ -1966,13 +2174,9 @@ async function requestCloseAI(
    );
  }
 
- if(
-  !repaired.r?.ok
- ){
+ if(!repaired.r?.ok){
   throw modelError(
-   repaired.r?.status||
-   502,
-
+   repaired.r?.status||502,
    repaired.lastDetail
   );
  }
@@ -1984,21 +2188,16 @@ async function requestCloseAI(
    ?.message
    ?.content;
 
- if(
-  !content
- ){
+ if(!content){
   throw Error(
    '模型修复结果为空，请重试。'
   );
  }
 
  return parser(
-  wrapText(
-   content
-  )
+  wrapText(content)
  );
 }
-
 
 async function requestGeminiOfficial(
  input,
@@ -2008,54 +2207,32 @@ async function requestGeminiOfficial(
  ground=false,
  images=[]
 ){
-
  const endpoint=
   `${geminiBase}/v1beta/models/${encodeURIComponent(model)}:generateContent`;
 
  const base={
   systemInstruction:{
+   parts:[{
+    text:instructions
+   }]
+  },
+  contents:[{
+   role:'user',
    parts:[
     {
-     text:
-      instructions
-    }
+     text:input
+    },
+    ...imageParts(images).map(img=>({
+     inlineData:{
+      mimeType:img.mimeType,
+      data:img.data
+     }
+    }))
    ]
-  },
-
-  contents:[
-   {
-    role:
-     'user',
-
-    parts:[
-     {
-      text:
-       input
-     },
-
-     ...imageParts(
-      images
-     ).map(
-      img=>({
-       inlineData:{
-        mimeType:
-         img.mimeType,
-
-        data:
-         img.data
-       }
-      })
-     )
-    ]
-   }
-  ],
-
+  }],
   generationConfig:{
-   responseMimeType:
-    'application/json',
-
-   responseSchema:
-    schema
+   responseMimeType:'application/json',
+   responseSchema:schema
   }
  };
 
@@ -2064,19 +2241,13 @@ async function requestGeminiOfficial(
    ? [
       {
        ...base,
-
-       tools:[
-        {
-         googleSearch:{}
-        }
-       ]
+       tools:[{
+        googleSearch:{}
+       }]
       },
-
       base,
-
       {
        ...base,
-
        generationConfig:{
         responseMimeType:
          'application/json'
@@ -2085,10 +2256,8 @@ async function requestGeminiOfficial(
      ]
    : [
       base,
-
       {
        ...base,
-
        generationConfig:{
         responseMimeType:
          'application/json'
@@ -2098,11 +2267,7 @@ async function requestGeminiOfficial(
 
  let last;
 
- for(
-  const payload
-  of payloads
- ){
-
+ for(const payload of payloads){
   last=
    await postModel(
     endpoint,
@@ -2110,21 +2275,14 @@ async function requestGeminiOfficial(
     {
      'Content-Type':
       'application/json',
-
      'x-goog-api-key':
       apiKey()
     }
    );
 
-  if(
-   last.r?.ok
-  ){
-
-   const o=
-    last.o;
-
-   const c=
-    o.candidates?.[0];
+  if(last.r?.ok){
+   const o=last.o;
+   const c=o.candidates?.[0];
 
    if(
     c?.finishReason&&
@@ -2136,65 +2294,39 @@ async function requestGeminiOfficial(
    }
 
    const wrapped={
-    output:[
-     {
-      type:
-       'message',
-
-      content:
-       (
-        c?.content?.parts||
-        []
-       )
+    output:[{
+     type:'message',
+     content:
+      (c?.content?.parts||[])
        .filter(
-        p=>
-         p.text&&
-         !p.thought
+        p=>p.text&&!p.thought
        )
-       .map(
-        p=>({
-         type:
-          'output_text',
-
-         text:
-          p.text
-        })
-       )
-     }
-    ]
+       .map(p=>({
+        type:'output_text',
+        text:p.text
+       }))
+    }]
    };
 
    return attachEvidence(
-    parser(
-     wrapped
-    ),
-
-    evidenceOfGemini(
-     o
-    )
+    parser(wrapped),
+    evidenceOfGemini(o)
    );
   }
 
   if(
-   ![
-    400,
-    404
-   ].includes(
-    last.r?.status
-   )
+   ![400,404]
+    .includes(last.r?.status)
   ){
    break;
   }
  }
 
  throw modelError(
-  last.r?.status||
-  502,
-
+  last.r?.status||502,
   last.lastDetail
  );
 }
-
 
 async function requestOpenAI(
  input,
@@ -2202,28 +2334,18 @@ async function requestOpenAI(
  schema,
  parser
 ){
-
  const endpoint=
   'https://api.openai.com/v1/responses';
 
  const payload={
   model,
-
   instructions,
-
   input,
-
   text:{
    format:{
-    type:
-     'json_schema',
-
-    name:
-     'liquid_page',
-
-    strict:
-     true,
-
+    type:'json_schema',
+    name:'liquid_page',
+    strict:true,
     schema
    }
   }
@@ -2236,28 +2358,20 @@ async function requestOpenAI(
    {
     'Content-Type':
      'application/json',
-
     Authorization:
      `Bearer ${apiKey()}`
    }
   );
 
- if(
-  !result.r?.ok
- ){
+ if(!result.r?.ok){
   throw modelError(
-   result.r?.status||
-   502,
-
+   result.r?.status||502,
    result.lastDetail
   );
  }
 
- return parser(
-  result.o
- );
+ return parser(result.o);
 }
-
 
 async function requestModel(
  input,
@@ -2267,10 +2381,7 @@ async function requestModel(
  ground=false,
  images=[]
 ){
-
- if(
-  isCloseAI
- ){
+ if(isCloseAI){
   return requestCloseAI(
    input,
    instructions,
@@ -2280,9 +2391,7 @@ async function requestModel(
   );
  }
 
- if(
-  isGemini
- ){
+ if(isGemini){
   return requestGeminiOfficial(
    input,
    instructions,
@@ -2301,129 +2410,73 @@ async function requestModel(
  );
 }
 
-
 const planPrompt=
- '理解用户真正要完成的任务，提取全部硬约束，并规划恰好七种呈现同一份最终答案的网页形态。七种形态依次对应 hand、terminal、magazine、ice、minimal、app、neon；它们只改变叙事顺序、视觉重点与交互方式，不得改变事实、计算、候选项或最终结论。sharedFacts 是统一事实账本：用户内容标 user/provided，无法核实的外部信息标 fact/unverified，假设标 assumption/unverified，计算标 calculation/provided；只有能由搜索引用元数据支撑的外部事实才允许最终升级为 verified；不得伪造来源、价格、库存、参数或商品详情 URL。系统附加的“图片输入状态”是可信边界：只有状态为成功且本次请求确实包含图片数据时，才允许把直接可见内容写成“图片观察”；读取失败的图片禁止推测其视觉内容，必须记录为“图片读取状态：读取失败，暂时无法进行视觉分析”。图片主要作为理解输入，默认不要求在最终页面展示原图；除非用户明确要求展示图片，或任务本身必须展示图片，否则不要选择image、image_gallery、product_image组件。每个形态给出适合的阅读场景、重点、相同交付目标、3至6节统一内容大纲与有效组件。严格限制文字，中文，不追问。';
-
+ '理解用户真正要完成的任务，提取全部硬约束，并规划恰好七种呈现同一份最终答案的网页形态。七种形态依次对应 hand、terminal、magazine、ice、minimal、app、neon；它们只改变叙事顺序、视觉重点与交互方式，不得改变事实、计算、候选项或最终结论。sharedFacts 是统一事实账本：用户内容标 user/provided，无法核实的外部信息标 fact/unverified，假设标 assumption/unverified，计算标 calculation/provided；只有能由搜索引用元数据支撑的外部事实才允许最终升级为 verified；不得伪造来源、价格、库存、参数或商品详情 URL。每个形态给出适合的阅读场景、重点、相同交付目标、3至6节统一内容大纲与有效组件。当任务涉及商品推荐、产品选型、品牌型号对比时，必须把 product_image 作为建议组件之一，让最终页面可以展示候选产品实物图；普通图片分析不要求展示原图。严格限制文字，中文，不追问。';
 
 const pagePrompt=
- '生成一份真正完成用户任务的统一内容结果，之后会被七种界面共同渲染。必须保留全部约束，先给关键判断，再展示思考路径、可比较的信息、可执行步骤与最终选择。若任务涉及购买、品牌或服务选择：至少列出3个不同品牌或候选项，分别写清适用人群、关键区别、风险和待核实参数；在相关section的links中为每个候选项给出搜索入口，label写候选名称，query写完整品牌型号关键词，channel在official、jd、taobao中选择，至少同时覆盖京东和淘宝。系统会安全生成站内搜索链接，不得编造商品详情URL。严格遵守imageInputStatus：只有本次请求中已成功解析并作为图片数据传入的图片，才能依据其直接可见内容生成“图片观察”；优先识别明显可见的主体对象、动物、家具、设备、文字、空间结构、布局和颜色，并明确区分“图片观察”和“AI建议/推断”。看不清或无法确认的细节必须标注“图片信息待核实”。若图片读取失败，禁止根据URL、文件名或上下文猜测任何视觉内容，必须明确写“图片读取状态：图片读取失败，暂时无法进行视觉分析”。图片主要作为理解输入，默认不展示原图。严格遵守displayImagesRequired：为false时不得使用image、image_gallery、product_image且所有media必须为空；为true时应为当前品牌和主要竞品增加product_image或image_gallery section，每张图片填写真实可直接访问的HTTPS图片URL，并准确填写品牌/产品名称、caption、来源名称与sourceUrl。优先品牌官网、官方旗舰店或可信资料页；找不到可靠图片时media返回空数组，禁止编造、错配或用无关图片替代。服务器会再次下载校验图片，无法访问的图片会被删除。所有外部事实必须来自sharedFacts；无法核实的参数或价格明确写待核实，不得伪造来源或精确数据。内容要具体。calculator用rows表示输入字段，第一行固定为[名称,初值,最小值,最大值,步长,单位]；items第一项只用sum或product。comparison/table/barChart使用rows且第一行表头，barChart第二列为数字。checklist/timeline/steps/cards用items。未使用字段返回空数组。用中文。';
-
+ '生成一份真正完成用户任务的统一内容结果，之后会被七种界面共同渲染。必须保留全部约束，先给关键判断，再展示思考路径、可比较的信息、可执行步骤与最终选择。若任务涉及购买、品牌、产品选型或商品对比：至少列出3个不同品牌或候选项，分别写清适用人群、关键区别、风险和待核实参数；必须生成至少一个type=product_image的section，位置尽量靠近推荐结论或对比表。product_image的media必须为每个主要候选商品保留一条记录，entity和title必须写具体品牌+型号，caption写一句与用户需求直接相关的推荐理由；如果搜索能够核实产品官网页、品牌页或可信商品页，把该页面填入sourceUrl并写明source。直接图片URL只有在确认是真实可访问图片时才填写url；如果不能确认图片直链，url必须返回空字符串，不得编造，后端会根据sourceUrl继续解析产品图。product_image这个section自己的links中也必须为每个候选项给出对应搜索入口，label写候选名称，query写完整品牌型号关键词，channel在official、jd、taobao中选择，每个候选至少覆盖京东或淘宝，整个section至少同时覆盖京东和淘宝。系统会安全生成站内搜索链接，不得编造商品详情URL。当存在用户上传的原始图片时，必须重新直接观察图片，不得只依赖originalQuery或sharedFacts。优先识别图片中明显可见的主体对象、动物、家具、设备、文字、空间结构、布局和颜色；若sharedFacts遗漏了明显视觉信息，应根据原图补充；看不清或无法确认的细节必须标注“图片信息待核实”，禁止臆测。普通图片主要作为理解输入，除非用户明确要求展示原图，否则不要为了展示用户上传图片而使用image组件。image_gallery用于明确需要多图展示的任务。除product_image外，media里只能填写真实可访问的图片URL；所有media记录都必须带title、caption、source、sourceUrl、entity和factIds。所有外部事实必须来自sharedFacts；无法核实的参数或价格明确写待核实，不得伪造来源或精确数据。图片只用于视觉展示，不得把图片本身当作参数事实证据。内容要具体。calculator用rows表示输入字段，第一行固定为[名称,初值,最小值,最大值,步长,单位]；items第一项只用sum或product。comparison/table/barChart使用rows且第一行表头，barChart第二列为数字。checklist/timeline/steps/cards用items。未使用字段返回空数组。用中文。';
 
 const planQuery=
- (
+ (q,images=[])=>requestModel(
   q,
-  images=[],
-  imageInputStatus='未提供图片'
- )=>
-  requestModel(
-   `${q}\n\n[系统图片输入状态]\n${imageInputStatus}`,
-   planPrompt,
-   planSchema,
-   parsePlan,
-   isGemini,
-   images
-  );
-
+  planPrompt,
+  planSchema,
+  parsePlan,
+  isGemini,
+  images
+ );
 
 const generatePage=
- async (
-  q,
-  p,
-  images=[],
-  imageInputStatus='未提供图片'
- )=>{
-  const displayImages=imageDisplayRequested(q);
-  const page=await requestModel(
-   JSON.stringify({
-    originalQuery:
-     q,
-
-    sharedConstraints:
-     p.constraints,
-
-    sharedFacts:
-     p.sharedFacts,
-
-    contentOutline:
-     p.variants[0].outline,
-
-    suggestedComponents:[
-     ...new Set(
-      p.variants.flatMap(
-       x=>
-        x.components
-      )
+ (q,p,images=[])=>requestModel(
+  JSON.stringify({
+   originalQuery:q,
+   sharedConstraints:
+    p.constraints,
+   sharedFacts:
+    p.sharedFacts,
+   contentOutline:
+    p.variants[0].outline,
+   suggestedComponents:[
+    ...new Set(
+     p.variants.flatMap(
+      x=>x.components
      )
-    ],
+    )
+   ],
+   imageContext:
+    images.length
+     ? '用户本次上传了原始参考图片。请在生成最终页面时重新直接观察图片，并将明显可见的主体、动物、家具、设备、文字、布局、颜色和空间信息纳入结果；不要只依赖sharedFacts。'
+     : ''
+  }),
+  pagePrompt,
+  pageSchema,
+  parsePage,
+  isGemini,
+  images
+ );
 
-    imageInputStatus,
-
-    displayImagesRequired:displayImages,
-
-    imageContext:
-     images.length
-      ? '本次请求包含已成功解析的原始图片数据。请重新直接观察图片；图片仅作为理解输入，除非用户明确要求，否则不要在页面展示原图。'
-      : '本次请求没有任何成功解析的图片数据，禁止生成“图片观察”。'
-   }),
-
-   pagePrompt,
-
-   pageSchema,
-
-   parsePage,
-
-   false,
-
-   images
-  );
-
-  await verifyDisplayMedia(page,displayImages);
-  return addDisplayMediaFallback(page,displayImages);
- };
-
-
-const sessions=
- new Map();
-
-const ttl=
- 2*60*60*1000;
-
+const sessions=new Map();
+const ttl=2*60*60*1000;
 
 function prune(){
-
- for(
-  const[id,s]
-  of sessions
- ){
-
+ for(const[id,s]of sessions){
   if(
-   Date.now()-
-   s.created>
-   ttl
+   Date.now()-s.created>ttl
   ){
-   sessions.delete(
-    id
-   );
+   sessions.delete(id);
   }
  }
 
- while(
-  sessions.size>=100
- ){
-
+ while(sessions.size>=100){
   sessions.delete(
-   sessions
-    .keys()
+   sessions.keys()
     .next()
     .value
   );
  }
 }
 
-
 function clientIp(req){
-
  return String(
   req.headers[
    'x-forwarded-for'
@@ -2431,35 +2484,27 @@ function clientIp(req){
   req.socket.remoteAddress||
   'unknown'
  )
- .split(',')[0]
- .trim();
+  .split(',')[0]
+  .trim();
 }
-
 
 function allowRequest(
  req,
  now=Date.now()
 ){
-
- const ip=
-  clientIp(req);
+ const ip=clientIp(req);
 
  const recent=
-  (
-   requestLog.get(ip)||
-   []
-  )
-  .filter(
-   time=>
-    now-time<
-    rateWindow
-  );
+  (requestLog.get(ip)||[])
+   .filter(
+    time=>
+     now-time<rateWindow
+   );
 
  if(
   recent.length>=
   requestLimit
  ){
-
   requestLog.set(
    ip,
    recent
@@ -2468,9 +2513,7 @@ function allowRequest(
   return false;
  }
 
- recent.push(
-  now
- );
+ recent.push(now);
 
  requestLog.set(
   ip,
@@ -2478,28 +2521,19 @@ function allowRequest(
  );
 
  if(
-  requestLog.size>
-  10000
+  requestLog.size>10000
  ){
-
   for(
-   const[
-    key,
-    times
-   ]
+   const[key,times]
    of requestLog
   ){
-
    if(
     !times.some(
      time=>
-      now-time<
-      rateWindow
+      now-time<rateWindow
     )
    ){
-    requestLog.delete(
-     key
-    );
+    requestLog.delete(key);
    }
   }
  }
@@ -2507,14 +2541,8 @@ function allowRequest(
  return true;
 }
 
-
 const send=
- (
-  res,
-  status,
-  data
- )=>{
-
+ (res,status,data)=>{
   res.writeHead(
    status,
    {
@@ -2524,26 +2552,21 @@ const send=
   );
 
   res.end(
-   JSON.stringify(
-    data
-   )
+   JSON.stringify(data)
   );
  };
-
 
 function body(
  req,
  res,
  cb
 ){
-
  let b='';
  let done=false;
 
  req.on(
   'data',
   c=>{
-
    if(done){
     return;
    }
@@ -2551,20 +2574,16 @@ function body(
    b+=c;
 
    if(
-    Buffer.byteLength(
-     b
-    )>
+    Buffer.byteLength(b)>
     7000000
    ){
-
     done=true;
 
     send(
      res,
      413,
      {
-      error:
-       '输入内容过长。'
+      error:'输入内容过长。'
      }
     );
    }
@@ -2574,40 +2593,27 @@ function body(
  req.on(
   'end',
   ()=>{
-
-   if(
-    !done
-   ){
+   if(!done){
     cb(b);
    }
   }
  );
 }
 
-
 const mime={
  '.html':
   'text/html; charset=utf-8',
-
  '.js':
   'text/javascript; charset=utf-8',
-
  '.css':
   'text/css; charset=utf-8',
-
  '.json':
   'application/json; charset=utf-8'
 };
 
-
 function createServer(){
-
  return http.createServer(
-  (
-   req,
-   res
-  )=>{
-
+  (req,res)=>{
    res.setHeader(
     'Cache-Control',
     'no-store'
@@ -2634,48 +2640,38 @@ function createServer(){
    );
 
    const route=
-    req.url
-     .split('?')[0];
-
+    req.url.split('?')[0];
 
    if(
     req.method==='GET'&&
     route==='/api/health'
    ){
-
     return send(
      res,
      200,
      {
-      ready:
-       Boolean(
-        apiKey()&&
-        apiKey()!==
-        'your_api_key_here'
-       ),
-
+      ready:Boolean(
+       apiKey()&&
+       apiKey()!==
+       'your_api_key_here'
+      ),
       model,
-
       provider:
        isGemini
         ? 'Gemini'
         : 'OpenAI',
-
       geminiBase:
        isGemini
         ? geminiBase
         : undefined,
-
       geminiGrounding:
        isGemini
         ? geminiGrounding
         : undefined,
-
       isCloseAI:
        isGemini
         ? isCloseAI
         : undefined,
-
       closeAIBase:
        isCloseAI
         ? closeAIBase
@@ -2684,23 +2680,19 @@ function createServer(){
     );
    }
 
-
    if(
     req.method==='GET'&&
     route.startsWith(
      '/api/session/'
     )
    ){
-
     const id=
      decodeURIComponent(
       route.slice(13)
      );
 
     const session=
-     sessions.get(
-      id
-     );
+     sessions.get(id);
 
     if(
      !session||
@@ -2708,7 +2700,6 @@ function createServer(){
      session.created>
      ttl
     ){
-
      return send(
       res,
       410,
@@ -2723,31 +2714,23 @@ function createServer(){
      res,
      200,
      {
-      sessionId:
-       id,
-
-      query:
-       session.query,
-
+      sessionId:id,
+      query:session.query,
       ...session.plan,
-
       pages:
        Object.fromEntries(
-        [
-         ...session.pages
-        ]
-        .filter(
-         ([,value])=>
-          !(
-           value
-           instanceof Promise
-          )
-        )
+        [...session.pages]
+         .filter(
+          ([,value])=>
+           !(
+            value
+            instanceof Promise
+           )
+         )
        )
      }
     );
    }
-
 
    if(
     req.method==='POST'&&
@@ -2755,17 +2738,11 @@ function createServer(){
      '/api/generate',
      '/api/plan',
      '/api/page'
-    ].includes(
-     route
-    )
+    ].includes(route)
    ){
-
     if(
-     !allowRequest(
-      req
-     )
+     !allowRequest(req)
     ){
-
      res.setHeader(
       'Retry-After',
       '3600'
@@ -2781,24 +2758,16 @@ function createServer(){
      );
     }
 
-
     return body(
      req,
      res,
-
      async raw=>{
-
       let payload;
 
       try{
-
        payload=
-        JSON.parse(
-         raw
-        );
-
+        JSON.parse(raw);
       }catch{
-
        return send(
         res,
         400,
@@ -2809,13 +2778,11 @@ function createServer(){
        );
       }
 
-
       if(
        !apiKey()||
        apiKey()===
        'your_api_key_here'
       ){
-
        return send(
         res,
         502,
@@ -2826,57 +2793,23 @@ function createServer(){
        );
       }
 
-
       try{
-
-
        if(
         route===
         '/api/plan'
        ){
-
         const textQuery=
-         typeof payload.query===
-         'string'
+         typeof payload.query==='string'
           ? payload.query.trim()
           : '';
 
-        const uploadedImages=
-         imageParts(
-          payload.images
-         );
-
-        const urlImageResult=
-         await imageUrlsToParts(
-          textQuery,
-          4-uploadedImages.length
-         );
-
-        const resolvedImages=
-         imageParts([
-          ...uploadedImages,
-          ...urlImageResult.images
-         ]);
-
-        const imageInputStatus=
-         describeImageInput(
-          uploadedImages,
-          urlImageResult
-         );
-
         const hasImages=
-         resolvedImages.length>0;
-
+         imageParts(payload.images).length>0;
 
         if(
-         (
-          !textQuery&&
-          !hasImages
-         )||
-         textQuery.length>
-         9000
+         (!textQuery&&!hasImages)||
+         textQuery.length>9000
         ){
-
          return send(
           res,
           400,
@@ -2887,67 +2820,46 @@ function createServer(){
          );
         }
 
-
         const effectiveQuery=
          textQuery||
          '请根据用户上传的参考图片理解其中的文字、物体、界面、布局、颜色、配置和可见结构，并据此生成合适的智能网页；看不清或无法确认的信息必须标为待核实。';
 
-
         const plan=
          await planQuery(
           effectiveQuery,
-          resolvedImages,
-          imageInputStatus
+          payload.images
          );
 
-
         prune();
-
 
         const id=
          crypto.randomUUID();
 
-
         sessions.set(
          id,
          {
-          query:
-           effectiveQuery,
-
+          query:effectiveQuery,
           plan,
-
-          images:
-           resolvedImages,
-
-          imageInputStatus,
-
-          pages:
-           new Map(),
-
-          created:
-           Date.now()
+          images:imageParts(payload.images),
+          pages:new Map(),
+          created:Date.now()
          }
         );
-
 
         return send(
          res,
          200,
          {
-          sessionId:
-           id,
-
+          sessionId:id,
           ...plan
          }
         );
        }
 
-
        if(
         route===
         '/api/page'
        ){
-
         if(
          typeof payload.sessionId!==
          'string'||
@@ -2957,7 +2869,6 @@ function createServer(){
          payload.variantIndex<0||
          payload.variantIndex>6
         ){
-
          return send(
           res,
           400,
@@ -2968,12 +2879,10 @@ function createServer(){
          );
         }
 
-
         const session=
          sessions.get(
           payload.sessionId
          );
-
 
         if(
          !session||
@@ -2981,7 +2890,6 @@ function createServer(){
          session.created>
          ttl
         ){
-
          return send(
           res,
           410,
@@ -2992,61 +2900,51 @@ function createServer(){
          );
         }
 
-
         if(
          !session.canonicalPage
         ){
-
          session.canonicalPage=
           generatePage(
            session.query,
            session.plan,
-           session.images||
-           [],
-           session.imageInputStatus
+           session.images||[]
           )
-          .then(
-           value=>{
-
-            /*
-             * 页面已经生成完成，
-             * 释放 Base64 原始图片，
-             * 避免 session 长期占内存。
-             */
-            session.images=[];
-
-
-            /*
-             * 七种页面共享同一份
-             * canonical 内容，
-             * 前端只负责不同视觉渲染。
-             */
-            for(
-             let i=0;
-             i<7;
-             i++
-            ){
-
-             session.pages.set(
-              i,
-              value
-             );
-            }
-
-            return value;
-           }
+          .then(page=>
+           ensureProductImageSection(
+            page,
+            session.plan,
+            session.query
+           )
           )
-          .catch(
-           error=>{
+          .then(page=>
+           enrichProductMedia(
+            page,
+            session.plan
+           )
+          )
+          .then(value=>{
+           session.images=[];
 
-            delete session
-             .canonicalPage;
-
-            throw error;
+           for(
+            let i=0;
+            i<7;
+            i++
+           ){
+            session.pages.set(
+             i,
+             value
+            );
            }
-          );
+
+           return value;
+          })
+          .catch(error=>{
+           delete session
+            .canonicalPage;
+
+           throw error;
+          });
         }
-
 
         return send(
          res,
@@ -3056,16 +2954,11 @@ function createServer(){
         );
        }
 
-
-       /*
-        * 兼容旧的 /api/generate 接口。
-        */
        if(
         typeof payload.query!==
         'string'||
         !payload.query.trim()
        ){
-
         return send(
          res,
          400,
@@ -3076,53 +2969,35 @@ function createServer(){
         );
        }
 
-
-       const uploadedImages=
-        imageParts(
-         payload.images
-        );
-
-       const urlImageResult=
-        await imageUrlsToParts(
-         payload.query.trim(),
-         4-uploadedImages.length
-        );
-
-       const resolvedImages=
-        imageParts([
-         ...uploadedImages,
-         ...urlImageResult.images
-        ]);
-
-       const imageInputStatus=
-        describeImageInput(
-         uploadedImages,
-         urlImageResult
-        );
-
        const plan=
         await planQuery(
          payload.query.trim(),
-         resolvedImages,
-         imageInputStatus
+         payload.images
         );
 
+       const page=
+        await generatePage(
+         payload.query.trim(),
+         plan,
+         imageParts(payload.images)
+        );
+
+       const withProductSection=
+        ensureProductImageSection(
+         page,
+         plan,
+         payload.query.trim()
+        );
 
        return send(
         res,
         200,
-
-        await generatePage(
-         payload.query.trim(),
-         plan,
-         resolvedImages,
-         imageInputStatus
+        await enrichProductMedia(
+         withProductSection,
+         plan
         )
        );
-
-
       }catch(error){
-
        return send(
         res,
         502,
@@ -3138,25 +3013,20 @@ function createServer(){
         }
        );
       }
-
      }
     );
    }
-
 
    const file=
     route==='/'
      ? '/index.html'
      : route;
 
-
    if(
     ![
      'GET',
      'HEAD'
-    ].includes(
-     req.method
-    )||
+    ].includes(req.method)||
     ![
      '/index.html',
      '/app.js',
@@ -3166,94 +3036,60 @@ function createServer(){
      '/evidence.css',
      '/input-media.css',
      '/evaluation-cases.json'
-    ].includes(
-     file
-    )
+    ].includes(file)
    ){
-
-    res.writeHead(
-     404
-    );
+    res.writeHead(404);
 
     return res.end(
      'Not found'
     );
    }
 
-
    res.writeHead(
     200,
     {
      'Content-Type':
       mime[
-       path.extname(
-        file
-       )
+       path.extname(file)
       ]||
       'application/octet-stream'
     }
    );
 
-
    if(
-    req.method===
-    'HEAD'
+    req.method==='HEAD'
    ){
     return res.end();
    }
-
 
    fs.createReadStream(
     path.join(
      root,
      file
     )
-   )
-   .pipe(
-    res
-   );
-
+   ).pipe(res);
   }
  );
 }
 
-
-if(
- require.main===
- module
-){
-
+if(require.main===module){
  createServer()
   .listen(
    Number(
     process.env.PORT
-   )||
-   3000,
-
+   )||3000,
    '0.0.0.0',
-
    ()=>{
-
     console.log(
      `Liquid web: http://localhost:${process.env.PORT||3000}`
     );
-
    }
   );
 }
-
 
 module.exports={
  createServer,
  parsePage,
  parsePlan,
- allowRequest,
- imageUrls,
- imageUrlsToParts,
- imageDisplayRequested,
- verifyDisplayMedia,
- referenceImage,
- addDisplayMediaFallback,
- isPrivateAddress,
- resolveQueryImages
+ allowRequest
 };
