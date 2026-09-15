@@ -792,6 +792,19 @@ function mediaCard(
                 : '<span>暂未取得可语义验证的产品主图</span>'
             }
           </div>
+
+          ${
+            m.searchSuggestions
+              ? `
+                <div
+                  class="google-search-attribution"
+                  style="margin-top:10px;font-size:12px;line-height:1.5;opacity:.78;overflow:auto;"
+                >
+                  ${m.searchSuggestions}
+                </div>
+              `
+              : ''
+          }
         </div>
       </article>
     `;
