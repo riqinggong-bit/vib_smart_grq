@@ -1698,6 +1698,18 @@ async function resolveProductMediaItem(item,plan){
  }
 }
 
+function looksLikeProductTask(page,query=''){
+ const text=[
+  query,
+  page?.title,
+  page?.subtitle,
+  page?.summary,
+  ...(page?.sections||[]).flatMap(s=>[s.heading,s.intro])
+ ].filter(Boolean).join(' ');
+
+ return /商品|产品|品牌|型号|车型|车载|轿车|汽车|新能源|手机|电脑|耳机|相机|冰箱|空调|净化器|电视|家电|选购|购买|推荐|价格|预算|配置|续航|电池|容量|款/i.test(text);
+}
+
 function ensureProductImageSection(page,plan,query=''){
  if(
   !page||
