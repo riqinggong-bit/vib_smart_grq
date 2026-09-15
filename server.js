@@ -1698,6 +1698,130 @@ async function resolveProductMediaItem(item,plan){
  }
 }
 
+function productSeedsFromLinks(section){
+ const seen=new Set();
+ const out=[];
+
+ for(const link of section.links||[]){
+  const entity=clean(link.label||link.query||'',80);
+
+  if(!entity||seen.has(entity))continue;
+  seen.add(entity);
+
+  out.push({
+   url:'',
+   title:entity,
+   caption:'',
+   source:'',
+   sourceUrl:'',
+   entity,
+   factIds:Array.isArray(section.factIds)?section.factIds:[]
+  });
+ }
+
+ return out.slice(0,4);
+}
+
+function isGenericCandidateLabel(value=''){
+ const text=clean(value,80).toLowerCase();
+
+ if(!text||text.length<2||text.length>50){
+  return true;
+ }
+
+ if(/^[\d\s.%¥￥$+\-/×x~～]+$/i.test(text)){
+  return true;
+ }
+
+ return /^(对比维度|对比项|参数|项目|指标|维度|产品|商品|品牌|型号|车型|候选|名称|方案|选项|定位|核心优势|主要短板|适用人群|风险与待核实参数|价格|售价|预算|尺寸|重量|续航|容量|噪音|功率|匹配度|推荐度)$/i.test(text);
+}
+
+function candidateLabelsFromSection(section){
+ if(
+  !section||
+  !['comparison','table'].includes(section.type)||
+  !Array.isArray(section.rows)||
+  section.rows.length<2
+ ){
+  return [];
+ }
+
+ const rows=section.rows;
+ const header=Array.isArray(rows[0])?rows[0]:[];
+
+ if(header.length<2){
+  return [];
+ }
+
+ const first=clean(header[0]||'',60);
+ const columnOriented=/对比|维度|项目|指标|参数|选项/i.test(first);
+
+ if(columnOriented){
+  const labels=header
+   .slice(1)
+   .map(x=>clean(x,80))
+   .filter(x=>!isGenericCandidateLabel(x));
+
+  if(labels.length>=2&&labels.length<=4){
+   return labels;
+  }
+ }
+
+ if(/产品|商品|品牌|型号|车型|候选|名称|方案|选项/i.test(first)){
+  const labels=rows
+   .slice(1)
+   .map(r=>Array.isArray(r)?clean(r[0]||'',80):'')
+   .filter(x=>!isGenericCandidateLabel(x))
+   .slice(0,4);
+
+  if(labels.length>=2){
+   return labels;
+  }
+ }
+
+ return [];
+}
+
+function linksForCandidates(page,candidates){
+ const allLinks=(page?.sections||[])
+  .flatMap(s=>Array.isArray(s.links)?s.links:[]);
+ const out=[];
+ const seen=new Set();
+
+ for(const candidate of candidates){
+  const matched=allLinks.filter(link=>
+   entityMatch(`${link.label||''} ${link.query||''}`,candidate)
+  );
+
+  for(const link of matched){
+   const key=`${link.channel}::${link.query}`;
+   if(seen.has(key))continue;
+   seen.add(key);
+   out.push({
+    label:clean(link.label||candidate,80),
+    query:clean(link.query||candidate,120),
+    channel:['official','jd','taobao'].includes(link.channel)?link.channel:'official'
+   });
+  }
+
+  const hasCandidate=out.some(link=>
+   entityMatch(`${link.label} ${link.query}`,candidate)
+  );
+
+  if(!hasCandidate){
+   for(const channel of ['jd','taobao']){
+    const key=`${channel}::${candidate}`;
+    if(seen.has(key))continue;
+    seen.add(key);
+    out.push({label:candidate,query:candidate,channel});
+   }
+  }
+ }
+
+ return out.slice(0,9);
+}
+
+
 function looksLikeProductTask(page,query=''){
  const text=[
   query,
