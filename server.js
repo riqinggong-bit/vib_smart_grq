@@ -1054,8 +1054,8 @@ function searchResultScore(result,entity){
  return score;
 }
 
-async function searchDuckDuckGo(entity){
- const q=encodeURIComponent(`"${entity}" 官方 产品`);
+async function searchDuckDuckGo(entity,site=''){
+ const q=encodeURIComponent(`"${entity}" ${site?`site:${site}`:'官方 产品'}`);
  const html=await searchHtml(`https://html.duckduckgo.com/html/?q=${q}`);
  const out=[];
  const re=/<a[^>]+class=["'][^"']*result__a[^"']*["'][^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
@@ -1067,15 +1067,16 @@ async function searchDuckDuckGo(entity){
 
   if(!/^https?:\/\//.test(url))continue;
   if(/duckduckgo\.com/i.test(new URL(url).hostname))continue;
+  if(site&&!new URL(url).hostname.endsWith(site))continue;
 
-  out.push({url,title,snippet:'',engine:'duckduckgo'});
+  out.push({url,title,snippet:'',engine:site.includes('jd.com')?'jd-index':site.includes('taobao.com')||site.includes('tmall.com')?'taobao-index':'duckduckgo'});
  }
 
  return out;
 }
 
-async function searchBing(entity){
- const q=encodeURIComponent(`"${entity}" 官方 产品`);
+async function searchBing(entity,site=''){
+ const q=encodeURIComponent(`"${entity}" ${site?`site:${site}`:'官方 产品'}`);
  const html=await searchHtml(`https://www.bing.com/search?q=${q}&count=10&setlang=zh-cn`);
  const out=[];
  const re=/<li[^>]+class=["'][^"']*b_algo[^"']*["'][\s\S]*?<h2[^>]*>\s*<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>[\s\S]*?<\/li>/gi;
@@ -1086,31 +1087,85 @@ async function searchBing(entity){
   const title=stripTags(m[2]);
 
   if(!/^https?:\/\//.test(url))continue;
-  out.push({url,title,snippet:'',engine:'bing'});
+  if(site&&!new URL(url).hostname.endsWith(site))continue;
+  out.push({url,title,snippet:'',engine:site.includes('jd.com')?'jd-index':site.includes('taobao.com')||site.includes('tmall.com')?'taobao-index':'bing'});
  }
 
  return out;
 }
 
-async function searchProductSources(entity){
- const all=[];
+function marketplaceResults(html,channel){
+ const normalized=String(html||'')
+  .replace(/\\u002f/gi,'/')
+  .replace(/\\\//g,'/')
+  .replace(/&amp;/gi,'&');
+ const out=[];
+ const seen=new Set();
+ const pattern=channel==='jd'
+  ? /(?:https?:)?\/\/item\.jd\.com\/(\d+)\.html/gi
+  : /(?:https?:)?\/\/(?:item\.taobao\.com|detail\.tmall\.com)\/item\.htm\?[^"'\s<>]{0,500}/gi;
+ let match;
 
- for(const fn of [searchDuckDuckGo,searchBing]){
-  try{
-   all.push(...await fn(entity));
-  }catch{}
+ while((match=pattern.exec(normalized))&&out.length<12){
+  let url=match[0].startsWith('//')?`https:${match[0]}`:match[0];
 
-  if(all.length>=6){
-   break;
+  if(channel==='jd'){
+   url=`https://item.jd.com/${match[1]}.html`;
+  }else{
+   try{
+    const parsed=new URL(url);
+    const id=parsed.searchParams.get('id');
+    if(!id||!/^[A-Za-z0-9_-]+$/.test(id))continue;
+    url=`https://${parsed.hostname}/item.htm?id=${encodeURIComponent(id)}`;
+   }catch{
+    continue;
+   }
   }
+
+  if(seen.has(url))continue;
+  seen.add(url);
+
+  const window=normalized.slice(Math.max(0,match.index-500),Math.min(normalized.length,pattern.lastIndex+500));
+  const context=clean(`${stripTags(window)} ${decodeHtml(window)}`,500);
+  out.push({url,title:clean(context,500),snippet:clean(context,500),engine:channel});
  }
+
+ return out;
+}
+
+async function searchJD(entity){
+ const q=encodeURIComponent(entity);
+ return marketplaceResults(await searchHtml(`https://search.jd.com/Search?keyword=${q}&enc=utf-8`),'jd');
+}
+
+async function searchTaobao(entity){
+ const q=encodeURIComponent(entity);
+ return marketplaceResults(await searchHtml(`https://s.taobao.com/search?q=${q}`),'taobao');
+}
+
+async function searchProductSources(entity){
+ const batches=await Promise.all(
+  [
+   ()=>searchJD(entity),
+   ()=>searchTaobao(entity),
+   ()=>searchDuckDuckGo(entity,'item.jd.com'),
+   ()=>searchBing(entity,'item.jd.com'),
+   ()=>searchDuckDuckGo(entity,'item.taobao.com'),
+   ()=>searchBing(entity,'detail.tmall.com'),
+   ()=>searchDuckDuckGo(entity),
+   ()=>searchBing(entity)
+  ].map(async run=>{
+   try{return await run();}catch{return [];}
+  })
+ );
+ const all=batches.flat();
 
  return all
   .filter((x,i,a)=>a.findIndex(y=>y.url===x.url)===i)
-  .map(x=>({...x,score:searchResultScore(x,entity)}))
+  .map(x=>({...x,score:searchResultScore(x,entity)+(/^(?:jd|taobao)/.test(x.engine)?8:0)}))
   .filter(x=>x.score>=5)
   .sort((a,b)=>b.score-a.score)
-  .slice(0,6);
+  .slice(0,8);
 }
 
 function proxyImageUrl(raw){
@@ -2967,5 +3022,8 @@ module.exports={
  createServer,
  parsePage,
  parsePlan,
- allowRequest
+ allowRequest,
+ marketplaceResults,
+ productMatchScore,
+ searchProductSources
 };
